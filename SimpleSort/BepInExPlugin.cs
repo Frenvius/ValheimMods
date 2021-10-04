@@ -18,6 +18,7 @@ namespace SimpleSort
         public static ConfigEntry<bool> modEnabled;
         public static ConfigEntry<bool> useGamePad;
         public static ConfigEntry<bool> allowPlayerInventorySort;
+        public static ConfigEntry<bool> allowPlayerInventoryStickySort;
         public static ConfigEntry<bool> playerStickySort;
         public static ConfigEntry<bool> containerStickySort;
         public static ConfigEntry<SortType> playerSortType;
@@ -51,6 +52,7 @@ namespace SimpleSort
             modEnabled = Config.Bind<bool>("General", "Enabled", true, "Enable this mod");
             useGamePad = Config.Bind<bool>("General", "useGamePad", false, "Allow sorting with gamepad?");
             allowPlayerInventorySort = Config.Bind<bool>("General", "AllowPlayerInventorySort", true, "Allow player inventory sorting?");
+            allowPlayerInventoryStickySort = Config.Bind<bool>("General", "allowPlayerInventoryStickySort", true, "Allow player inventory sticky sorting?");
             playerStickySort = Config.Bind<bool>("General", "PlayerStickySort", true, "Automatically apply last sort type to player inventory on open");
             containerStickySort = Config.Bind<bool>("General", "ContainerStickySort", true, "Automatically apply last sort type to container inventory on open");
             playerSortAsc = Config.Bind<bool>("General", "playerSortAsc", true, "Current player sort method (changes automatically for sticky sorting)");
@@ -201,23 +203,27 @@ namespace SimpleSort
             var items = inventory.GetAllItems();
             SortUtils.SortByName(items, true, player);
 
-            for (int i = 0; i < items.Count; i++)
+            if (Player.m_localPlayer && allowPlayerInventoryStickySort.Value)
             {
-                if (player && ((playerSortStartRow.Value > 1 && items[i].m_gridPos.y < playerSortStartRow.Value - 1) || (playerSortEndRow.Value > 0 && items[i].m_gridPos.y >= playerSortEndRow.Value)))
-                    continue;
-
-                while (i < items.Count - 1 && items[i].m_stack < items[i].m_shared.m_maxStackSize && items[i + 1].m_shared.m_name == items[i].m_shared.m_name)
+                for (int i = 0; i < items.Count; i++)
                 {
-                    int amount = Mathf.Min(items[i].m_shared.m_maxStackSize - items[i].m_stack, items[i + 1].m_stack);
-                    items[i].m_stack += amount;
-                    if (amount == items[i + 1].m_stack)
+                    if (player && ((playerSortStartRow.Value > 1 && items[i].m_gridPos.y < playerSortStartRow.Value - 1) || (playerSortEndRow.Value > 0 && items[i].m_gridPos.y >= playerSortEndRow.Value)))
+                        continue;
+
+                    while (i < items.Count - 1 && items[i].m_stack < items[i].m_shared.m_maxStackSize && items[i + 1].m_shared.m_name == items[i].m_shared.m_name)
                     {
-                        items.RemoveAt(i + 1);
+                        int amount = Mathf.Min(items[i].m_shared.m_maxStackSize - items[i].m_stack, items[i + 1].m_stack);
+                        items[i].m_stack += amount;
+                        if (amount == items[i + 1].m_stack)
+                        {
+                            items.RemoveAt(i + 1);
+                        }
+                        else
+                            items[i + 1].m_stack -= amount;
                     }
-                    else
-                        items[i + 1].m_stack -= amount;
                 }
             }
+            
             switch (type)
             {
                 case SortType.Name:
