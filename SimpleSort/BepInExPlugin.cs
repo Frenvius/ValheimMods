@@ -203,23 +203,41 @@ namespace SimpleSort
             var items = inventory.GetAllItems();
             SortUtils.SortByName(items, true, player);
 
-            if (Player.m_localPlayer && allowPlayerInventoryStickySort.Value)
-            {
-                for (int i = 0; i < items.Count; i++)
-                {
-                    if (player && ((playerSortStartRow.Value > 1 && items[i].m_gridPos.y < playerSortStartRow.Value - 1) || (playerSortEndRow.Value > 0 && items[i].m_gridPos.y >= playerSortEndRow.Value)))
-                        continue;
+            if (Player.m_localPlayer && allowPlayerInventoryStickySort.Value) {
+                var grouped = items.Where(itm => itm.m_stack < itm.m_shared.m_maxStackSize)
+                    .GroupBy(itm => itm.m_shared.m_name).Where(itm => itm.Count() > 1)
+                    .Select(grouping => grouping.ToList());
+                    
+                foreach (var nonFullStacks in grouped) {
+                    var maxStack = nonFullStacks.First().m_shared.m_maxStackSize;
 
-                    while (i < items.Count - 1 && items[i].m_stack < items[i].m_shared.m_maxStackSize && items[i + 1].m_shared.m_name == items[i].m_shared.m_name)
-                    {
-                        int amount = Mathf.Min(items[i].m_shared.m_maxStackSize - items[i].m_stack, items[i + 1].m_stack);
-                        items[i].m_stack += amount;
-                        if (amount == items[i + 1].m_stack)
-                        {
-                            items.RemoveAt(i + 1);
+                    var numTimes = 0;
+                    var curStack = nonFullStacks[0];
+                    nonFullStacks.RemoveAt(0);
+
+                    var enumerator = nonFullStacks.GetEnumerator();
+                    while (nonFullStacks.Count >= 1) {
+                        numTimes += 1;
+                        enumerator.MoveNext();
+                        var stack = enumerator.Current;
+                        if (stack == null) break;
+
+                        if (curStack.m_stack >= maxStack) {
+                            curStack = stack;
+                            nonFullStacks.Remove(stack);
+                            enumerator = nonFullStacks.GetEnumerator();
+                            continue;
                         }
-                        else
-                            items[i + 1].m_stack -= amount;
+
+                        var toStack = Math.Min(maxStack - curStack.m_stack, stack.m_stack);
+                        if (toStack > 0) {
+                            curStack.m_stack += toStack;
+                            stack.m_stack -= toStack;
+
+                            if (stack.m_stack <= 0) {
+                                inventory.RemoveItem(stack);
+                            }
+                        }
                     }
                 }
             }
