@@ -1,6 +1,8 @@
 ﻿using BepInEx;
+using BepInEx.Bootstrap;
 using BepInEx.Configuration;
 using HarmonyLib;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -9,7 +11,7 @@ using UnityEngine;
 
 namespace RecipeCustomization
 {
-    [BepInPlugin("aedenthorn.RecipeCustomization", "Recipe Customization", "0.5.1")]
+    [BepInPlugin("aedenthorn.RecipeCustomization", "Recipe Customization", "0.7.0")]
     public partial class BepInExPlugin : BaseUnityPlugin
     {
         private static BepInExPlugin context;
@@ -31,7 +33,7 @@ namespace RecipeCustomization
             Water = 1024
         }
 
-        public static void Dbgl(string str = "", bool pref = true)
+        public static void Dbgl(object str, bool pref = true)
         {
             if (isDebug.Value)
                 Debug.Log((pref ? typeof(BepInExPlugin).Namespace + " " : "") + str);
@@ -64,7 +66,7 @@ namespace RecipeCustomization
         }
         public static IEnumerator DelayedLoadRecipes()
         {
-            yield return null;
+            yield return new WaitForSeconds(0.1f);
             LoadAllRecipeData(true);
             yield break;
         }
@@ -87,8 +89,15 @@ namespace RecipeCustomization
 
             foreach (string file in Directory.GetFiles(assetPath, "*.json"))
             {
-                RecipeData data = JsonUtility.FromJson<RecipeData>(File.ReadAllText(file));
-                recipeDatas.Add(data);
+                try
+                {
+                    RecipeData data = JsonUtility.FromJson<RecipeData>(File.ReadAllText(file));
+                    recipeDatas.Add(data);
+                }
+                catch(Exception ex)
+                {
+                    Dbgl(ex);
+                }
             }
         }
 
@@ -117,7 +126,7 @@ namespace RecipeCustomization
 
             for (int i = ObjectDB.instance.m_recipes.Count - 1; i > 0; i--)
             {
-                if (ObjectDB.instance.m_recipes[i].m_item?.m_itemData.m_shared.m_name == go.GetComponent<ItemDrop>().m_itemData.m_shared.m_name)
+                if (ObjectDB.instance.m_recipes[i].m_item?.m_itemData.m_shared.m_name == go.GetComponent<ItemDrop>().m_itemData.m_shared.m_name && (data.originalAmount <= 0 || ObjectDB.instance.m_recipes[i].m_amount == data.originalAmount))
                 {
                     if (data.disabled)
                     {
@@ -244,8 +253,22 @@ namespace RecipeCustomization
             Recipe recipe = ObjectDB.instance.GetRecipe(item);
             if (!recipe)
             {
-                Dbgl("Recipe not found!");
-                return null;
+                if (Chainloader.PluginInfos.ContainsKey("com.jotunn.jotunn"))
+                {
+                    object itemManager = Chainloader.PluginInfos["com.jotunn.jotunn"].Instance.GetType().Assembly.GetType("Jotunn.Managers.ItemManager").GetProperty("Instance", BindingFlags.Public | BindingFlags.Static).GetValue(null);
+                    object cr = AccessTools.Method(itemManager.GetType(), "GetRecipe").Invoke(itemManager, new[] { item.m_shared.m_name });
+                    if (cr != null)
+                    {
+                        recipe = (Recipe)AccessTools.Property(cr.GetType(), "Recipe").GetValue(cr);
+                        Dbgl($"Jotunn recipe: {item.m_shared.m_name} {recipe != null}");
+                    }
+                }
+
+                if (!recipe) 
+                { 
+                    Dbgl($"Recipe not found for item {item.m_shared.m_name}!");
+                    return null;
+                }
             }
 
             var data = new RecipeData()
@@ -305,22 +328,22 @@ namespace RecipeCustomization
                 {
                     context.Config.Reload();
                     context.Config.Save();
-                    AccessTools.Method(typeof(Terminal), "AddString").Invoke(__instance, new object[] { text });
-                    AccessTools.Method(typeof(Terminal), "AddString").Invoke(__instance, new object[] { $"{context.Info.Metadata.Name} config reloaded" });
+                    __instance.AddString( text );
+                    __instance.AddString( $"{context.Info.Metadata.Name} config reloaded" );
                     return false;
                 }
                 else if (text.ToLower().Equals($"{typeof(BepInExPlugin).Namespace.ToLower()} reload"))
                 {
                     GetRecipeDataFromFiles();
-                    AccessTools.Method(typeof(Terminal), "AddString").Invoke(__instance, new object[] { text });
+                    __instance.AddString( text );
                     if (ObjectDB.instance)
                     {
                         LoadAllRecipeData(true);
-                        AccessTools.Method(typeof(Terminal), "AddString").Invoke(__instance, new object[] { $"{context.Info.Metadata.Name} reloaded recipes from files" });
+                        __instance.AddString( $"{context.Info.Metadata.Name} reloaded recipes from files" );
                     }
                     else
                     {
-                        AccessTools.Method(typeof(Terminal), "AddString").Invoke(__instance, new object[] { $"{context.Info.Metadata.Name} reloaded recipes from files" });
+                        __instance.AddString( $"{context.Info.Metadata.Name} reloaded recipes from files" );
                     }
                     return false;
                 }
@@ -332,9 +355,9 @@ namespace RecipeCustomization
                     if (recipData == null)
                         return false;
                     CheckModFolder();
-                    File.WriteAllText(Path.Combine(assetPath, recipData.name + ".json"), JsonUtility.ToJson(recipData));
-                    AccessTools.Method(typeof(Terminal), "AddString").Invoke(__instance, new object[] { text });
-                    AccessTools.Method(typeof(Terminal), "AddString").Invoke(__instance, new object[] { $"{context.Info.Metadata.Name} saved recipe data to {file}.json" });
+                    File.WriteAllText(Path.Combine(assetPath, recipData.name + ".json"), JsonUtility.ToJson(recipData, true));
+                    __instance.AddString( text );
+                    __instance.AddString( $"{context.Info.Metadata.Name} saved recipe data to {file}.json" );
                     return false;
                 }
                 else if (text.ToLower().StartsWith($"{typeof(BepInExPlugin).Namespace.ToLower()} dump "))
@@ -344,9 +367,9 @@ namespace RecipeCustomization
                     RecipeData recipeData = GetRecipeDataByName(recipe);
                     if (recipeData == null)
                         return false;
-                    Dbgl(JsonUtility.ToJson(recipeData));
-                    AccessTools.Method(typeof(Terminal), "AddString").Invoke(__instance, new object[] { text });
-                    AccessTools.Method(typeof(Terminal), "AddString").Invoke(__instance, new object[] { $"{context.Info.Metadata.Name} dumped {recipe}" });
+                    Dbgl(JsonUtility.ToJson(recipeData, true));
+                    __instance.AddString( text );
+                    __instance.AddString( $"{context.Info.Metadata.Name} dumped {recipe}" );
                     return false;
                 }
                 else if (text.ToLower().StartsWith($"{typeof(BepInExPlugin).Namespace.ToLower()}"))
@@ -356,8 +379,8 @@ namespace RecipeCustomization
                     + $"{context.Info.Metadata.Name} dump <ItemName>\r\n"
                     + $"{context.Info.Metadata.Name} save <ItemName>";
 
-                    AccessTools.Method(typeof(Terminal), "AddString").Invoke(__instance, new object[] { text });
-                    AccessTools.Method(typeof(Terminal), "AddString").Invoke(__instance, new object[] { output });
+                    __instance.AddString( text );
+                    __instance.AddString( output );
                     return false;
                 }
                 return true;

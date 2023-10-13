@@ -6,13 +6,14 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace CraftingFilter
 {
-    [BepInPlugin("aedenthorn.CraftingFilter", "Crafting Filter", "0.6.0")]
+    [BepInPlugin("aedenthorn.CraftingFilter", "Crafting Filter", "0.9.0")]
     public class BepInExPlugin : BaseUnityPlugin
     {
 
@@ -39,7 +40,6 @@ namespace CraftingFilter
         private static int lastCategoryIndex = 0;
         private Vector3 lastMousePos;
         private static bool isShowing = false;
-        private static string craftText = "Craft";
         private static string assetPath;
         private static int tabCraftPressed = 0;
 
@@ -94,7 +94,7 @@ namespace CraftingFilter
             {
                 data = JsonUtility.FromJson<CategoryData>(File.ReadAllText(file));
             }
-            Dbgl("Loaded" + data.categories.Count + " categories");
+            Dbgl("Loaded " + data.categories.Count + " categories");
 
             categoryDict.Clear();
             categoryNames.Clear();
@@ -161,7 +161,6 @@ namespace CraftingFilter
             {
                 if (rcr.gameObject.layer == LayerMask.NameToLayer("UI"))
                 {
-
                     if (rcr.gameObject.name == "Craft")
                     {
                         hover = true;
@@ -258,7 +257,7 @@ namespace CraftingFilter
             Traverse t = Traverse.Create(InventoryGui.instance);
             t.Method("UpdateRecipeList", new object[] { recipes }).GetValue();
             t.Method("SetRecipe", new object[] { 0, true }).GetValue();
-            InventoryGui.instance.m_tabCraft.gameObject.GetComponentInChildren<Text>().text = craftText + (categoryDict[categoryNames[lastCategoryIndex]].Contains(ItemDrop.ItemData.ItemType.None) ? "" : "\n" + categoryNames[lastCategoryIndex]);
+            InventoryGui.instance.m_tabCraft.gameObject.GetComponentInChildren<TMP_Text>().text = Localization.instance.Localize("$inventory_craftbutton") + (categoryDict[categoryNames[lastCategoryIndex]].Contains(ItemDrop.ItemData.ItemType.None) ? "" : "\n" + categoryNames[lastCategoryIndex]);
         }
 
         private static void GetFilteredRecipes(ref List<Recipe> recipes)
@@ -280,7 +279,7 @@ namespace CraftingFilter
                 List<Recipe> recipes = new List<Recipe>();
                 Player.m_localPlayer.GetAvailableRecipes(ref recipes);
 
-                float gameScale = GameObject.Find("GUI").GetComponent<CanvasScaler>().scaleFactor;
+                float gameScale = GameObject.Find("LoadingGUI").GetComponent<CanvasScaler>().scaleFactor;
                 Vector2 pos = InventoryGui.instance.m_tabCraft.gameObject.transform.GetComponent<RectTransform>().position;
                 float height = InventoryGui.instance.m_tabCraft.gameObject.transform.GetComponent<RectTransform>().rect.height * gameScale;
 
@@ -292,7 +291,7 @@ namespace CraftingFilter
                     if (count > 0 || categoryDict[categoryNames[i]].Contains(ItemDrop.ItemData.ItemType.None))
                     {
                         dropDownList[i].GetComponent<RectTransform>().position = pos - new Vector2(0, height * (showCount++ + 1));
-                        dropDownList[i].GetComponentInChildren<Text>().text = categoryNames[i] + (count == 0 ? "" : $" ({count})");
+                        dropDownList[i].GetComponentInChildren<TMP_Text>().text = categoryNames[i] + (count == 0 ? "" : $" ({count})");
                     }
                 }
             }
@@ -331,7 +330,7 @@ namespace CraftingFilter
                 if (!modEnabled.Value)
                     return;
 
-                InventoryGui.instance.m_tabCraft.gameObject.GetComponentInChildren<Text>().text = craftText;
+                InventoryGui.instance.m_tabCraft.gameObject.GetComponentInChildren<TextMeshProUGUI>().text = Localization.instance.Localize("$inventory_craftbutton");
                 lastCategoryIndex = 0;
             }
         }
@@ -360,7 +359,6 @@ namespace CraftingFilter
                 dropDownList.Clear();
 
                 //buttonObj.transform.parent.SetAsLastSibling();
-                craftText = __instance.m_tabCraft.gameObject.GetComponentInChildren<Text>().text;
                 for (int i = 0; i < categoryNames.Count; i++)
                 {
                     int idx = i;

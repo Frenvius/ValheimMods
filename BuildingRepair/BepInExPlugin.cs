@@ -6,7 +6,7 @@ using UnityEngine;
 
 namespace BuildingRepair
 {
-    [BepInPlugin("aedenthorn.BuildingRepair", "Building Repair", "0.2.0")]
+    [BepInPlugin("aedenthorn.BuildingRepair", "Building Repair", "0.3.0")]
     public class BepInExPlugin : BaseUnityPlugin
     {
         private static readonly bool isDebug = true;
@@ -76,7 +76,7 @@ namespace BuildingRepair
                 Piece piece = array[i].GetComponentInParent<Piece>();
                 if (piece)
                 {
-                    if (!piece.IsCreator() && !allowRepairOther.Value)
+                    if (!allowRepairOther.Value && !piece.IsCreator())
                     {
                         continue;
                     }

@@ -4,13 +4,14 @@ using HarmonyLib;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 using Debug = UnityEngine.Debug;
 
 namespace ExtendedPlayerInventory
 {
-    [BepInPlugin("aedenthorn.ExtendedPlayerInventory", "Extended Player Inventory", "0.3.1")]
+    [BepInPlugin("aedenthorn.ExtendedPlayerInventory", "Extended Player Inventory", "0.8.0")]
     public class BepInExPlugin : BaseUnityPlugin
     {
         private static BepInExPlugin context;
@@ -21,6 +22,7 @@ namespace ExtendedPlayerInventory
         public static ConfigEntry<int> nexusID;
 
         public static ConfigEntry<bool> addEquipmentRow;
+        public static ConfigEntry<bool> showGearInMenu;
         public static ConfigEntry<bool> displayEquipmentRowSeparate;
         public static ConfigEntry<int> extraRows;
         
@@ -52,6 +54,15 @@ namespace ExtendedPlayerInventory
             ItemDrop.ItemData.ItemType.Shoulder,
             ItemDrop.ItemData.ItemType.Utility,
         };
+        
+        private static FieldInfo[] fields = new FieldInfo[] 
+        {
+            AccessTools.Field(typeof(Humanoid), "m_helmetItem"),
+            AccessTools.Field(typeof(Humanoid), "m_chestItem"),
+            AccessTools.Field(typeof(Humanoid), "m_legItem"),
+            AccessTools.Field(typeof(Humanoid), "m_shoulderItem"),
+            AccessTools.Field(typeof(Humanoid), "m_utilityItem"),
+        };
 
         private static ItemDrop.ItemData[] equipItems = new ItemDrop.ItemData[5];
 
@@ -71,6 +82,7 @@ namespace ExtendedPlayerInventory
 
             extraRows = Config.Bind<int>("Toggles", "ExtraRows", 0, "Number of extra ordinary rows.");
             addEquipmentRow = Config.Bind<bool>("Toggles", "AddEquipmentRow", true, "Add special row for equipped items and quick slots.");
+            showGearInMenu = Config.Bind<bool>("Toggles", "ShowGearInMenu", true, "Display equipped items in the main menu.");
             displayEquipmentRowSeparate = Config.Bind<bool>("Toggles", "DisplayEquipmentRowSeparate", true, "Display equipment and quickslots in their own area.");
 
             helmetText = Config.Bind<string>("Strings", "HelmetText", "Head", "Text to show for helmet slot.");
@@ -91,8 +103,6 @@ namespace ExtendedPlayerInventory
             quickAccessX = Config.Bind<float>("ZCurrentPositions", "quickAccessX", 9999, "Current X of Quick Slots");
             quickAccessY = Config.Bind<float>("ZCurrentPositions", "quickAccessY", 9999, "Current Y of Quick Slots");
 
-            if (!modEnabled.Value)
-                return;
 
             hotkeys = new ConfigEntry<string>[]
             {
@@ -161,7 +171,6 @@ namespace ExtendedPlayerInventory
                 t.Field("m_loading").SetValue(true);
                 t.Field("m_inventory").GetValue<Inventory>().Load(pkg);
                 t.Field("m_loading").SetValue(false);
-                t.Field("m_lastRevision").SetValue(t.Field("m_nview").GetValue<ZNetView>().GetZDO().m_dataRevision);
                 t.Field("m_lastDataString").SetValue(dataString);
             }
         }
@@ -179,6 +188,161 @@ namespace ExtendedPlayerInventory
             }
         }
 
+        [HarmonyPatch(typeof(InventoryGui), "Show")]
+        static class InventoryGui_Show_Patch
+        {
+            static void Postfix(InventoryGui __instance)
+            {
+                if (!modEnabled.Value || !addEquipmentRow.Value || !Player.m_localPlayer)
+                    return;
+
+                Dbgl("InventoryGui Show");
+
+                ArrangeEquipment(Player.m_localPlayer);
+
+                if (displayEquipmentRowSeparate.Value && __instance.m_player.Find("EquipmentBkg") == null)
+                {
+                    Transform bkg = Instantiate(__instance.m_player.Find("Bkg"), __instance.m_player);
+                    bkg.SetAsFirstSibling();
+                    bkg.name = "EquipmentBkg";
+                    bkg.GetComponent<RectTransform>().anchorMin = new Vector2(1, 0);
+                    bkg.GetComponent<RectTransform>().anchorMax = new Vector2(1.5f, 1);
+                }
+                else if (!displayEquipmentRowSeparate.Value && __instance.m_player.Find("EquipmentBkg"))
+                {
+                    Destroy(__instance.m_player.Find("EquipmentBkg").gameObject);
+                }
+
+            }
+        }
+        [HarmonyPatch(typeof(Inventory), "Changed")]
+        static class Inventory_Changed_Patch
+        {
+            static void Postfix(Inventory __instance)
+            {
+                if (!modEnabled.Value || !addEquipmentRow.Value || !Player.m_localPlayer || __instance != Player.m_localPlayer.GetInventory())
+                    return;
+
+                int height = extraRows.Value + (addEquipmentRow.Value ? 5 : 4);
+                AccessTools.FieldRefAccess<Inventory, int>(__instance, "m_height") = height;
+                //Dbgl("Changed: "+Environment.StackTrace);
+                ArrangeEquipment(Player.m_localPlayer);
+            }
+
+        }
+
+        [HarmonyPatch(typeof(Humanoid), "SetupEquipment")]
+        static class Humanoid_SetupEquipment_Patch
+        {
+            static void Postfix(Humanoid __instance)
+            {
+                if (!modEnabled.Value || !addEquipmentRow.Value || !(__instance is Player) || (__instance != Player.m_localPlayer && (!showGearInMenu.Value || Player.m_localPlayer != null)))
+                    return;
+                //Dbgl("Setup: " + Environment.StackTrace);
+                ArrangeEquipment((Player)__instance);
+            }
+
+        }
+        
+        [HarmonyPatch(typeof(Humanoid), "UnequipItem")]
+        static class Humanoid_UnequipItem_Patch
+        {
+            static void Postfix(Humanoid __instance, ItemDrop.ItemData item)
+            {
+                //Dbgl($"Unequip {item?.m_shared.m_name}: " + Environment.StackTrace);
+            }
+
+        }
+
+        [HarmonyPatch(typeof(Player), "EquipInventoryItems")]
+        static class Humanoid_EquipItem_Patch
+        {
+            static void Postfix(Player __instance)
+            {
+                //Dbgl("EquipIventoryItems: " + Environment.StackTrace);
+                ArrangeEquipment(__instance);
+            }
+        }
+
+        private static void ArrangeEquipment(Player __instance)
+        {
+            if (!modEnabled.Value || !addEquipmentRow.Value)
+                return;
+            Inventory inv = __instance.GetInventory();
+
+
+            var items = inv.GetAllItems();
+
+            ItemDrop.ItemData[] equipment = new ItemDrop.ItemData[]
+            {
+                AccessTools.FieldRefAccess<Humanoid, ItemDrop.ItemData>(__instance, "m_helmetItem"),
+                AccessTools.FieldRefAccess<Humanoid, ItemDrop.ItemData>(__instance, "m_chestItem"),
+                AccessTools.FieldRefAccess<Humanoid, ItemDrop.ItemData>(__instance, "m_legItem"),
+                AccessTools.FieldRefAccess<Humanoid, ItemDrop.ItemData>(__instance, "m_shoulderItem"),
+                AccessTools.FieldRefAccess<Humanoid, ItemDrop.ItemData>(__instance, "m_utilityItem")
+            };
+
+
+            int width = inv.GetWidth();
+            int offset = width * (inv.GetHeight() - 1);
+
+            if (equipment[0] != null)
+                equipment[0].m_gridPos = new Vector2i(offset % width, offset / width);
+            offset++;
+
+            if (equipment[1] != null)
+                equipment[1].m_gridPos = new Vector2i(offset % width, offset / width);
+            offset++;
+
+            if (equipment[2] != null)
+                equipment[2].m_gridPos = new Vector2i(offset % width, offset / width);
+            offset++;
+
+            if (equipment[3] != null)
+                equipment[3].m_gridPos = new Vector2i(offset % width, offset / width);
+            offset++;
+
+            if (equipment[4] != null)
+                equipment[4].m_gridPos = new Vector2i(offset % width, offset / width);
+
+
+            for (int i = 0; i < items.Count; i++)
+            {
+                if (IsAtEquipmentSlot(inv, items[i], out int which))
+                {
+                    //Dbgl($"{items[i].m_shared.m_itemType} {typeEnums[which]} {items[i].m_shared.m_name} {items[i].m_equiped}");
+
+                    if (items[i] == equipment[which])
+                    {
+                        //Dbgl($"already equipped: {items[i].m_equiped}");
+                        items[i].m_equipped = true;
+                        continue;
+                    }
+
+                    if (items[i].m_shared.m_itemType == typeEnums[which] && equipItems[which] != items[i]) // in right slot and new
+                    {
+                        //Dbgl($"equipping: {__instance.EquipItem(items[i])}");
+                        __instance.EquipItem(items[i]);
+                        equipment[which] = items[i];
+                        items[i].m_equipped = true;
+                        continue;
+                    }
+
+                    // in wrong slot or unequipped in slot or can't equip
+                    Vector2i newPos = (Vector2i)typeof(Inventory).GetMethod("FindEmptySlot", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(inv, new object[] { true });
+                    if (newPos.x < 0 || newPos.y < 0 || newPos.y == inv.GetHeight() - 1)
+                    {
+                        __instance.DropItem(inv, items[i], items[i].m_stack);
+                    }
+                    else
+                    {
+                        items[i].m_gridPos = newPos;
+                    }
+                }
+            }
+            equipItems = equipment;
+
+        }
         [HarmonyPatch(typeof(Player), "Update")]
         static class Player_Update_Patch
         {
@@ -207,6 +371,8 @@ namespace ExtendedPlayerInventory
                 else if (AedenthornUtils.CheckKeyDown(hotKey3.Value))
                     which = 3;
                 else return;
+
+                Dbgl($"Pressed hotkey {which}");
 
                 ItemDrop.ItemData itemAt = ___m_inventory.GetItemAt(which + 4, ___m_inventory.GetHeight() - 1);
                 if (itemAt != null)
@@ -239,81 +405,11 @@ namespace ExtendedPlayerInventory
         [HarmonyPatch(typeof(InventoryGui), "Update")]
         static class InventoryGui_Update_Patch
         {
-            static void Postfix(InventoryGui __instance, InventoryGrid ___m_playerGrid, Animator ___m_animator)
+            static void Postfix(InventoryGui __instance, Animator ___m_animator, InventoryGrid ___m_playerGrid)
             {
                 if (!modEnabled.Value || !Player.m_localPlayer)
                     return;
 
-                if (addEquipmentRow.Value)
-                {
-                    Traverse t = Traverse.Create(Player.m_localPlayer);
-
-                    Inventory inv = Player.m_localPlayer.GetInventory();
-
-                    var items = inv.GetAllItems();
-
-                    var helmet = t.Field("m_helmetItem").GetValue<ItemDrop.ItemData>();
-                    var chest = t.Field("m_chestItem").GetValue<ItemDrop.ItemData>();
-                    var legs = t.Field("m_legItem").GetValue<ItemDrop.ItemData>();
-                    var back = t.Field("m_shoulderItem").GetValue<ItemDrop.ItemData>();
-                    var utility = t.Field("m_utilityItem").GetValue<ItemDrop.ItemData>();
-
-
-                    int width = inv.GetWidth();
-                    int offset = width * (inv.GetHeight() - 1);
-
-                    if (helmet != null)
-                        t.Field("m_helmetItem").GetValue<ItemDrop.ItemData>().m_gridPos = new Vector2i(offset % width, offset / width);
-                    offset++;
-
-                    if (chest != null)
-                        t.Field("m_chestItem").GetValue<ItemDrop.ItemData>().m_gridPos = new Vector2i(offset % width, offset / width);
-                    offset++;
-
-                    if (legs != null)
-                        t.Field("m_legItem").GetValue<ItemDrop.ItemData>().m_gridPos = new Vector2i(offset % width, offset / width);
-                    offset++;
-
-                    if (back != null)
-                        t.Field("m_shoulderItem").GetValue<ItemDrop.ItemData>().m_gridPos = new Vector2i(offset % width, offset / width);
-                    offset++;
-
-                    if (utility != null)
-                        t.Field("m_utilityItem").GetValue<ItemDrop.ItemData>().m_gridPos = new Vector2i(offset % width, offset / width);
-
-
-                    for (int i = 0; i < items.Count; i++)
-                    {
-                        //Dbgl($"{items[i].m_gridPos} {inv.GetHeight() - 1},0 {items[i] != helmet}");
-                        if (IsAtEquipmentSlot(inv, items[i], out int which))
-                        {
-                            if ( // in right slot and equipped
-                                (which == 0 && items[i] == helmet) ||
-                                (which == 1 && items[i] == chest) ||
-                                (which == 2 && items[i] == legs) ||
-                                (which == 3 && items[i] == back) ||
-                                (which == 4 && items[i] == utility)
-                                )
-                                continue;
-
-                            if (which > -1 && items[i].m_shared.m_itemType == typeEnums[which] && equipItems[which] != items[i] && Player.m_localPlayer.EquipItem(items[i], false)) // in right slot and new
-                                continue;
-
-                            // in wrong slot or unequipped in slot or can't equip
-                            Vector2i newPos = (Vector2i)typeof(Inventory).GetMethod("FindEmptySlot", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(inv, new object[] { true });
-                            if (newPos.x < 0 || newPos.y < 0 || newPos.y == inv.GetHeight() - 1)
-                            {
-                                Player.m_localPlayer.DropItem(inv, items[i], items[i].m_stack);
-                            }
-                            else
-                            {
-                                items[i].m_gridPos = newPos;
-                                ___m_playerGrid.UpdateInventory(inv, Player.m_localPlayer, null);
-                            }
-                        }
-                    }
-                    equipItems = new ItemDrop.ItemData[] { helmet, chest, legs, back, utility };
-                }
 
                 if (___m_animator.GetBool("visible"))
                 {
@@ -346,8 +442,6 @@ namespace ExtendedPlayerInventory
             {
                 if (!modEnabled.Value || !addEquipmentRow.Value)
                     return;
-
-                Traverse t = Traverse.Create(Player.m_localPlayer);
 
                 Inventory inv = Player.m_localPlayer.GetInventory();
 
@@ -385,12 +479,12 @@ namespace ExtendedPlayerInventory
             {
                 t = Instantiate(elementPrefab.transform.Find("binding"), transform);
             }
-            t.GetComponent<Text>().enabled = true;
-            t.GetComponent<Text>().text = value;
+            t.GetComponent<TMP_Text>().enabled = true;
+            t.GetComponent<TMP_Text>().text = value;
+            t.GetComponent<RectTransform>().sizeDelta = new Vector2(300, 17);
             if (center)
             {
-                t.GetComponent<RectTransform>().sizeDelta = new Vector2(80, 17);
-                t.GetComponent<RectTransform>().anchoredPosition = new Vector2(30, -10);
+                t.GetComponent<RectTransform>().anchoredPosition = new Vector2(32, -10);
             }
         }
         
@@ -423,7 +517,7 @@ namespace ExtendedPlayerInventory
             {
                 if (!modEnabled.Value || !addEquipmentRow.Value || __instance != Player.m_localPlayer.GetInventory())
                     return true;
-                Dbgl("GetEmptySlots");
+                //Dbgl("GetEmptySlots");
                 int count = ___m_inventory.FindAll(i => i.m_gridPos.y < ___m_height - 1).Count;
                 __result = (___m_height - 1) * ___m_width - count;
                 return false;
@@ -436,10 +530,10 @@ namespace ExtendedPlayerInventory
 
             static bool Prefix(Inventory __instance, ref bool __result, List<ItemDrop.ItemData> ___m_inventory, int ___m_width, int ___m_height)
             {
-                if (!modEnabled.Value || !addEquipmentRow.Value || __instance != Player.m_localPlayer.GetInventory())
+                if (!modEnabled.Value || !addEquipmentRow.Value || ___m_inventory is null || __instance != Player.m_localPlayer?.GetInventory())
                     return true;
 
-                int count = ___m_inventory.FindAll(i => i.m_gridPos.y < ___m_height - 1).Count;
+                int count = ___m_inventory.FindAll(i => i?.m_gridPos.y < ___m_height - 1).Count;
 
                 __result = count < ___m_width * (___m_height - 1);
                 return false;
@@ -539,7 +633,7 @@ namespace ExtendedPlayerInventory
                 if (!modEnabled.Value || !addEquipmentRow.Value || Player.m_localPlayer == null)
                     return;
 
-                float gameScale = GameObject.Find("GUI").GetComponent<CanvasScaler>().scaleFactor;
+                float gameScale = GameObject.Find("LoadingGUI").GetComponent<CanvasScaler>().scaleFactor;
 
                 Vector3 mousePos = Input.mousePosition;
 

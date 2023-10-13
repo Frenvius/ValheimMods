@@ -9,7 +9,7 @@ using UnityEngine.EventSystems;
 
 namespace MonsterAITweaks
 {
-    [BepInPlugin("aedenthorn.MonsterAITweaks", "Monster AI Tweaks", "0.4.0")]
+    [BepInPlugin("aedenthorn.MonsterAITweaks", "Monster AI Tweaks", "0.5.0")]
     public class BepInExPlugin: BaseUnityPlugin
     {
         private static readonly bool isDebug = true;
@@ -46,6 +46,7 @@ namespace MonsterAITweaks
         private static string[] noBuildingTargetList;
         private static string[] fearFireList;
         private static string[] avoidFireList;
+
 
         public static void Dbgl(string str = "", bool pref = true)
         {

@@ -3,10 +3,11 @@
   <PropertyGroup>
     <AssemblyName>$(ProjectName)</AssemblyName>
     <RootNamespace>$(ProjectName)</RootNamespace>
-    <TargetFramework>net462</TargetFramework>
+    <TargetFramework>net480</TargetFramework>
     <Platforms>AnyCPU</Platforms>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <GamePath><!-- Set GamePath manually --></GamePath>
+    <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
   </PropertyGroup>
 
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
@@ -93,6 +94,11 @@
       <HintPath>$(ManagedDataPath)\assembly_guiutils.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="ui_lib">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>$(ManagedDataPath)\ui_lib.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="assembly_postprocessing">
       <SpecificVersion>False</SpecificVersion>
       <HintPath>$(ManagedDataPath)\assembly_postprocessing.dll</HintPath>
@@ -111,15 +117,6 @@
     <Reference Include="assembly_utils">
       <SpecificVersion>False</SpecificVersion>
       <HintPath>$(ManagedDataPath)\assembly_utils.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-  </ItemGroup>
-
-  <!-- Add ServerSync reference -->
-  <ItemGroup Label="ServerSync">
-    <Reference Include="ServerSync">
-      <HintPath>..\..\ServerSync\bin\Debug\ServerSync.dll</HintPath>
-      <SpecificVersion>False</SpecificVersion>
       <Private>False</Private>
     </Reference>
   </ItemGroup>
@@ -179,6 +176,11 @@
     <Reference Include="UnityEngine.ScreenCaptureModule">
       <SpecificVersion>False</SpecificVersion>
       <HintPath>$(UnityPath)\UnityEngine.ScreenCaptureModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Unity.TextMeshPro">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>$(ManagedDataPath)\Unity.TextMeshPro.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="UnityEngine.UI">

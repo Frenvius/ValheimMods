@@ -6,12 +6,13 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
 namespace RepairRequiresMats
 {
-    [BepInPlugin("aedenthorn.RepairRequiresMats", "Repair Requires Mats", "0.3.1")]
+    [BepInPlugin("aedenthorn.RepairRequiresMats", "Repair Requires Mats", "0.6.0")]
     public class BepInExPlugin : BaseUnityPlugin
     {
         private static bool isDebug = true;
@@ -26,7 +27,11 @@ namespace RepairRequiresMats
         private static List<ItemDrop.ItemData> orderedWornItems = new List<ItemDrop.ItemData>();
 
         private static BepInExPlugin context;
+
         private static Assembly epicLootAssembly;
+        private static MethodInfo epicLootIsMagic;
+        private static MethodInfo epicLootGetRarity;
+        private static MethodInfo epicLootGetEnchantCosts;
 
         public static void Dbgl(string str = "", bool pref = true)
         {
@@ -37,20 +42,26 @@ namespace RepairRequiresMats
         {
             context = this;
             modEnabled = Config.Bind<bool>("General", "Enabled", true, "Enable this mod");
+            nexusID = Config.Bind<int>("General", "NexusID", 215, "Nexus mod ID for updates");
             showAllRepairsInToolTip = Config.Bind<bool>("General", "ShowAllRepairsInToolTip", true, "Show all repairs in tooltip when hovering over repair button.");
             titleTooltipColor = Config.Bind<string>("General", "TitleTooltipColor", "FFFFFFFF", "Color to use in tooltip title.");
             hasEnoughTooltipColor = Config.Bind<string>("General", "HasEnoughTooltipColor", "FFFFFFFF", "Color to use in tooltip for items with enough resources to repair.");
             notEnoughTooltipColor = Config.Bind<string>("General", "NotEnoughTooltipColor", "FF0000FF", "Color to use in tooltip for items with enough resources to repair.");
             materialRequirementMult = Config.Bind<float>("General", "MaterialRequirementMult", 0.5f, "Multiplier for amount of each material required.");
-            nexusID = Config.Bind<int>("General", "NexusID", 215, "Nexus mod ID for updates");
 
             Harmony.CreateAndPatchAll(Assembly.GetExecutingAssembly(), null);
 
         }
         private void Start()
         {
-            if(Chainloader.PluginInfos.ContainsKey("randyknapp.mods.epicloot"))
+            if (Chainloader.PluginInfos.ContainsKey("randyknapp.mods.epicloot"))
+            {
                 epicLootAssembly = Chainloader.PluginInfos["randyknapp.mods.epicloot"].Instance.GetType().Assembly;
+                epicLootIsMagic = epicLootAssembly.GetType("EpicLoot.ItemDataExtensions").GetMethod("IsMagic", BindingFlags.Public | BindingFlags.Static, null, new Type[] { typeof(ItemDrop.ItemData) }, null);
+                epicLootGetRarity = epicLootAssembly.GetType("EpicLoot.ItemDataExtensions").GetMethod("GetRarity", BindingFlags.Public | BindingFlags.Static);
+                epicLootGetEnchantCosts = epicLootAssembly.GetType("EpicLoot.Crafting.EnchantTabController").GetMethod("GetEnchantCosts", BindingFlags.Public | BindingFlags.Static);
+                Dbgl($"Loaded Epic Loot assembly; epicLootIsMagic {epicLootIsMagic != null}, epicLootGetRarity {epicLootGetRarity != null}, epicLootGetEnchantCosts {epicLootGetEnchantCosts != null}");
+            }
 
         }
 
@@ -95,20 +106,33 @@ namespace RepairRequiresMats
                         unableRepairs.Add(new RepairItemData(item));
                         continue;
                     }
-                    Recipe recipe = RepairRecipe(item);
-                    if (recipe == null)
+                    List<Piece.Requirement> reqs = RepairReqs(item);
+                    if (reqs == null)
                     {
                         freeRepairs.Add(new RepairItemData(item));
                         continue;
                     }
                     List<string> reqstring = new List<string>();
-                    foreach (Piece.Requirement req in recipe.m_resources)
+                    foreach (Piece.Requirement req in reqs)
                     {
-                        if (req.GetAmount(item.m_quality) == 0)
+                        if (req.m_amount == 0)
                             continue;
-                        reqstring.Add($"{req.GetAmount(item.m_quality)}/{Player.m_localPlayer.GetInventory().CountItems(req.m_resItem.m_itemData.m_shared.m_name)} {Localization.instance.Localize(req.m_resItem.m_itemData.m_shared.m_name)}");
+                        reqstring.Add($"{req.m_amount}/{Player.m_localPlayer.GetInventory().CountItems(req.m_resItem.m_itemData.m_shared.m_name)} {Localization.instance.Localize(req.m_resItem.m_itemData.m_shared.m_name)}");
                     }
-                    if (!Traverse.Create(Player.m_localPlayer).Method("HaveRequirements", new object[] { recipe.m_resources, false, 1 }).GetValue<bool>())
+                    bool enough = true;
+                    foreach (Piece.Requirement requirement in reqs)
+                    {
+                        if (requirement.m_resItem)
+                        {
+                            int amount = requirement.m_amount;
+                            if (Player.m_localPlayer.GetInventory().CountItems(requirement.m_resItem.m_itemData.m_shared.m_name) < amount)
+                            {
+                                enough = false;
+                                break;
+                            }
+                        }
+                    }
+                    if (!enough)
                         notEnoughRepairs.Add(new RepairItemData(item, reqstring));
                     else
                         enoughRepairs.Add(new RepairItemData(item, reqstring));
@@ -144,9 +168,9 @@ namespace RepairRequiresMats
                 if (go == null || tt.transform.name != "RepairButton")
                     return;
 
-                Utils.FindChild(go.transform, "Text").GetComponent<Text>().supportRichText = true;
-                Utils.FindChild(go.transform, "Text").GetComponent<Text>().alignment = TextAnchor.LowerCenter;
-                Utils.FindChild(go.transform, "Text").GetComponent<Text>().text = $"<b><color=#{titleTooltipColor.Value}>{Localization.instance.Localize("$inventory_repairbutton")}</color></b>\r\n" + string.Join("\r\n", outstring);
+                Utils.FindChild(go.transform, "Text").GetComponent<TMP_Text>().richText = true;
+                Utils.FindChild(go.transform, "Text").GetComponent<TMP_Text>().alignment = TextAlignmentOptions.Bottom;
+                Utils.FindChild(go.transform, "Text").GetComponent<TMP_Text>().text = $"<b><color=#{titleTooltipColor.Value}>{Localization.instance.Localize("$inventory_repairbutton")}</color></b>\r\n" + string.Join("\r\n", outstring);
             }
         }
 
@@ -165,21 +189,35 @@ namespace RepairRequiresMats
                         __result = false;
                         return;
                     }
-                    Recipe recipe = RepairRecipe(item, true);
-                    if (recipe == null)
+                    List<Piece.Requirement> reqs = RepairReqs(item, true);
+                    if (reqs == null)
                         return;
 
                     List<string> reqstring = new List<string>();
-                    foreach (Piece.Requirement req in recipe.m_resources)
+                    foreach (Piece.Requirement req in reqs)
                     {
                         if (req?.m_resItem?.m_itemData?.m_shared == null)
                             continue;
-                        reqstring.Add($"{req.GetAmount(item.m_quality)}/{Player.m_localPlayer.GetInventory().CountItems(req.m_resItem.m_itemData.m_shared.m_name)} {Localization.instance.Localize(req.m_resItem.m_itemData.m_shared.m_name)}");
+                        reqstring.Add($"{req.m_amount}/{Player.m_localPlayer.GetInventory().CountItems(req.m_resItem.m_itemData.m_shared.m_name)} {Localization.instance.Localize(req.m_resItem.m_itemData.m_shared.m_name)}");
                     }
                     string outstring;
-                    if (Traverse.Create(Player.m_localPlayer).Method("HaveRequirements", new object[] { recipe.m_resources, false, 1 }).GetValue<bool>())
+
+                    bool enough = true;
+                    foreach (Piece.Requirement requirement in reqs)
                     {
-                        Player.m_localPlayer.ConsumeResources(recipe.m_resources, item.m_quality);
+                        if (requirement.m_resItem)
+                        {
+                            int amount = requirement.m_amount;
+                            if (Player.m_localPlayer.GetInventory().CountItems(requirement.m_resItem.m_itemData.m_shared.m_name) < amount)
+                            {
+                                enough = false;
+                                break;
+                            }
+                        }
+                    }
+                    if (enough)
+                    {
+                        Player.m_localPlayer.ConsumeResources(reqs.ToArray(), 1);
                         outstring = $"Used {string.Join(", ", reqstring)} to repair {Localization.instance.Localize(item.m_shared.m_name)}";
                         __result = true;
                     }
@@ -195,62 +233,78 @@ namespace RepairRequiresMats
             }
         }
 
-        private static Recipe RepairRecipe(ItemDrop.ItemData item, bool log = false)
+        private static List<Piece.Requirement> RepairReqs(ItemDrop.ItemData item, bool log = false)
         {
             float percent = (item.GetMaxDurability() - item.m_durability) / item.GetMaxDurability();
             Recipe fullRecipe = ObjectDB.instance.GetRecipe(item);
-            var fullReqs = fullRecipe.m_resources.ToList();
+            if (fullRecipe is null)
+                return null;
+            var fullReqs = new List<Piece.Requirement>(fullRecipe.m_resources);
 
             bool isMagic = false;
             if (epicLootAssembly != null)
             {
-                isMagic = (bool)epicLootAssembly.GetType("EpicLoot.ItemDataExtensions").GetMethod("IsMagic", BindingFlags.Public | BindingFlags.Static, null, new Type[] { typeof(ItemDrop.ItemData) }, null).Invoke(null, new[] { item });
+                try
+                {
+                    isMagic = (bool)epicLootIsMagic.Invoke(null, new[] { item });
+                }
+                catch { }
             }
             if (isMagic)
             {
-                int rarity = (int)epicLootAssembly.GetType("EpicLoot.ItemDataExtensions").GetMethod("GetRarity", BindingFlags.Public | BindingFlags.Static).Invoke(null, new[] { item });
-                List<KeyValuePair<ItemDrop, int>> magicReqs =  (List<KeyValuePair<ItemDrop, int>>)epicLootAssembly.GetType("EpicLoot.Crafting.EnchantTabController").GetMethod("GetEnchantCosts", BindingFlags.Public | BindingFlags.Static).Invoke(null, new object[] { item, rarity });
-                foreach(var kvp in magicReqs)
+                try
                 {
-                    fullReqs.Add(new Piece.Requirement()
+                    int rarity = (int)epicLootGetRarity.Invoke(null, new[] { item });
+                    List<KeyValuePair<ItemDrop, int>> magicReqs = (List<KeyValuePair<ItemDrop, int>>)epicLootGetEnchantCosts.Invoke(null, new object[] { item, rarity });
+                    foreach (var kvp in magicReqs)
                     {
-                        m_amount = kvp.Value,
-                        m_resItem = kvp.Key
-                    });
+                        fullReqs.Add(new Piece.Requirement()
+                        {
+                            m_amount = kvp.Value,
+                            m_resItem = kvp.Key
+                        });
+                    }
                 }
+                catch { }
             }
 
+            
             List<Piece.Requirement> reqs = new List<Piece.Requirement>();
-            Recipe recipe = ScriptableObject.CreateInstance<Recipe>();
             for (int i = 0; i < fullReqs.Count; i++)
             {
 
-                var req = new Piece.Requirement()
-                {
+                Piece.Requirement req = new Piece.Requirement() 
+                { 
                     m_resItem = fullReqs[i].m_resItem,
-                    m_amountPerLevel = Mathf.FloorToInt(fullReqs[i].m_amountPerLevel * percent * materialRequirementMult.Value),
-                    m_amount = Mathf.FloorToInt(fullReqs[i].m_amount * percent * materialRequirementMult.Value),
+                    m_amount = fullReqs[i].m_amount,
+                    m_amountPerLevel = fullReqs[i].m_amountPerLevel,
+                    m_recover = fullReqs[i].m_recover
                 };
 
                 int amount = 0;
                 for (int j = item.m_quality; j > 0; j--)
                 {
+                    //Dbgl($"{req.m_resItem.m_itemData.m_shared.m_name} req for level {j} {req.m_amount}, {req.m_amountPerLevel} {req.GetAmount(j)}");
                     amount += req.GetAmount(j);
                 }
 
+                int fraction = Mathf.RoundToInt(amount * percent * materialRequirementMult.Value);
 
-                if (amount > 0)
+
+                //Dbgl($"total {req.m_resItem.m_itemData.m_shared.m_name} reqs for {item.m_shared.m_name}, dur {item.m_durability}/{item.GetMaxDurability()} ({item.GetDurabilityPercentage()} {percent}): {fraction}/{amount}");
+                
+                if (fraction > 0)
                 {
+                    req.m_amount = fraction;
                     reqs.Add(req);
                 }
             }
-            recipe.m_resources = reqs.ToArray();
 
             if (!reqs.Any())
             {
                 return null;
             }
-            return recipe;
+            return reqs;
         }
 
 

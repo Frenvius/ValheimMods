@@ -10,7 +10,7 @@ using UnityEngine;
 
 namespace CustomWeaponStats
 {
-    [BepInPlugin("aedenthorn.CustomWeaponStats", "Custom Weapon Stats", "0.6.1")]
+    [BepInPlugin("aedenthorn.CustomWeaponStats", "Custom Weapon Stats", "0.7.0")]
     public partial class BepInExPlugin : BaseUnityPlugin
     {
         private static BepInExPlugin context;
@@ -127,8 +127,6 @@ namespace CustomWeaponStats
                 __state = new WeaponState(weapon);
 
                 weapon.m_shared.m_useDurabilityDrain *= globalUseDurabilityMultiplier.Value;
-                weapon.m_shared.m_holdDurationMin *= globalHoldDurationMinMultiplier.Value;
-                weapon.m_shared.m_holdStaminaDrain *= globalHoldStaminaDrainMultiplier.Value;
                 weapon.m_shared.m_attackForce *= globalAttackForceMultiplier.Value;
                 weapon.m_shared.m_backstabBonus *= globalBackstabBonusMultiplier.Value;
                 weapon.m_shared.m_damages.m_damage *= globalDamageMultiplier.Value;
@@ -151,8 +149,6 @@ namespace CustomWeaponStats
                     return;
 
                 weapon.m_shared.m_useDurabilityDrain = __state.useDurabilityDrain;
-                weapon.m_shared.m_holdDurationMin = __state.holdDurationMin;
-                weapon.m_shared.m_holdStaminaDrain = __state.holdStaminaDrain;
                 weapon.m_shared.m_attackForce = __state.attackForce;
                 weapon.m_shared.m_backstabBonus = __state.backstabBonus;
                 weapon.m_shared.m_damages.m_damage = __state.damage;
@@ -247,8 +243,6 @@ namespace CustomWeaponStats
             item.m_shared.m_useDurabilityDrain = weapon.useDurabilityDrain;
             item.m_shared.m_durabilityPerLevel = weapon.durabilityPerLevel;
             item.m_shared.m_skillType = weapon.skillType;
-            item.m_shared.m_holdDurationMin = weapon.holdDurationMin;
-            item.m_shared.m_holdStaminaDrain = weapon.holdStaminaDrain;
             item.m_shared.m_toolTier = weapon.toolTier;
             item.m_shared.m_blockable = weapon.blockable;
             item.m_shared.m_dodgeable = weapon.dodgeable;
@@ -282,8 +276,15 @@ namespace CustomWeaponStats
             item.m_shared.m_damagesPerLevel.m_lightning = weapon.lightningPerLevel;
             item.m_shared.m_damagesPerLevel.m_poison = weapon.poisonPerLevel;
             item.m_shared.m_damagesPerLevel.m_spirit = weapon.spiritPerLevel;
+            
+            item.m_shared.m_attack.m_hitTerrain = weapon.hitTerrain;
+            if(item.m_shared.m_secondaryAttack != null)
+                item.m_shared.m_secondaryAttack.m_hitTerrain = weapon.hitTerrainSecondary;
 
-            item.m_shared.m_attackStatusEffect = ObjectDB.instance.GetStatusEffect(weapon.statusEffect);
+            item.m_shared.m_attackStatusEffect = ObjectDB.instance.GetStatusEffect((string.IsNullOrEmpty(weapon.statusEffect) ? 0 : weapon.statusEffect.GetStableHashCode()));
+
+
+
             //Dbgl($"Set weapon data for {weapon.name}");
         }
 
@@ -312,8 +313,6 @@ namespace CustomWeaponStats
                 durabilityPerLevel = item.m_shared.m_durabilityPerLevel,
                 useDurabilityDrain = item.m_shared.m_useDurabilityDrain,
                 skillType = item.m_shared.m_skillType,
-                holdDurationMin = item.m_shared.m_holdDurationMin,
-                holdStaminaDrain = item.m_shared.m_holdStaminaDrain,
                 toolTier = item.m_shared.m_toolTier,
                 blockable = item.m_shared.m_blockable,
                 dodgeable = item.m_shared.m_dodgeable,
@@ -348,7 +347,10 @@ namespace CustomWeaponStats
                 poisonPerLevel = item.m_shared.m_damagesPerLevel.m_poison,
                 spiritPerLevel = item.m_shared.m_damagesPerLevel.m_spirit,
 
-                statusEffect = item.m_shared.m_attackStatusEffect?.name
+                statusEffect = item.m_shared.m_attackStatusEffect?.name,
+
+                hitTerrain = item.m_shared.m_attack?.m_hitTerrain == true,
+                hitTerrainSecondary = item.m_shared.m_secondaryAttack?.m_hitTerrain == true
             };
         }
         private static void CheckModFolder()

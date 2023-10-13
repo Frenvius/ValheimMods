@@ -14,7 +14,7 @@ using UnityEngine.Networking;
 
 namespace NexusUpdate
 {
-    [BepInPlugin("aedenthorn.NexusUpdate", "Nexus Update", "1.1.1")]
+    [BepInPlugin("aedenthorn.NexusUpdate", "Nexus Update", "1.3.0")]
     public class BepInExPlugin: BaseUnityPlugin
     {
         private static readonly bool isDebug = true;
@@ -25,16 +25,18 @@ namespace NexusUpdate
         public static ConfigEntry<bool> createEmptyConfigFiles;
         public static ConfigEntry<bool> showIgnoreButton;
         public static ConfigEntry<bool> updateButtonFirst;
+
         public static ConfigEntry<Vector2> updatesPosition;
         public static ConfigEntry<int> updateTextWidth;
         public static ConfigEntry<int> fontSize;
         public static ConfigEntry<Color> updateFontColor;
-        public static ConfigEntry<Color> nonUpdateFontColor;
-        public static ConfigEntry<Color> windowBackgroundColor;
-        public static ConfigEntry<float> windowHeight;
-        public static ConfigEntry<int> betweenSpace;
         public static ConfigEntry<int> buttonWidth;
         public static ConfigEntry<int> buttonHeight;
+        public static ConfigEntry<int> betweenSpace;
+        public static ConfigEntry<float> windowHeight;
+        public static ConfigEntry<Color> windowBackgroundColor;
+
+        public static ConfigEntry<Color> nonUpdateFontColor;
 
         public static ConfigEntry<string> updateText;
         public static ConfigEntry<string> nonUpdateText;

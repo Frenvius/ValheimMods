@@ -9,7 +9,7 @@ using UnityEngine;
 
 namespace CustomItemInfoDisplay
 {
-    [BepInPlugin("aedenthorn.CustomItemInfoDisplay", "Custom Item Info Display", "0.2.0")]
+    [BepInPlugin("aedenthorn.CustomItemInfoDisplay", "Custom Item Info Display", "0.3.1")]
     public partial class BepInExPlugin : BaseUnityPlugin
     {
         private static BepInExPlugin context;
@@ -49,6 +49,12 @@ namespace CustomItemInfoDisplay
             typeTemplates.Clear();
             foreach (ItemDrop.ItemData.ItemType type in Enum.GetValues(typeof(ItemDrop.ItemData.ItemType)))
             {
+                var path = Path.Combine(assetPath, "ItemTypes", type + ".txt");
+                if (!File.Exists(path))
+                {
+                    Dbgl($"Template file not found: {path}");
+                    continue;
+                }
                 typeTemplates.Add(type, File.ReadAllLines(Path.Combine(assetPath, "ItemTypes", type + ".txt")));
             }
         }
@@ -69,23 +75,26 @@ namespace CustomItemInfoDisplay
             return true;
         }
 
-        [HarmonyPatch(typeof(ItemDrop.ItemData), "GetTooltip", new Type[]{typeof(ItemDrop.ItemData), typeof(int), typeof(bool) })]
+        [HarmonyPatch(typeof(ItemDrop.ItemData), "GetTooltip", new Type[]{typeof(ItemDrop.ItemData), typeof(int), typeof(bool), typeof(float) })]
         static class GetTooltip_Patch
         {
-            static bool Prefix(ItemDrop.ItemData item, int qualityLevel, bool crafting, ref string __result)
+            static bool Prefix(ItemDrop.ItemData item, int qualityLevel, float worldLevel, bool crafting, ref string __result)
             {
                 if (!modEnabled.Value || baseTemplate == null)
                     return true;
 
-                __result = CheckReplaceTemplate(baseTemplate, item, qualityLevel, crafting);
-                __result = __result.Replace("{itemTypeInfo}", CheckReplaceTemplate(typeTemplates[item.m_shared.m_itemType], item, qualityLevel, crafting));
+                __result = CheckReplaceTemplate(baseTemplate, item, qualityLevel, worldLevel, crafting);
+                if(typeTemplates.TryGetValue(item.m_shared.m_itemType, out var t))
+                {
+                    __result = __result.Replace("{itemTypeInfo}", CheckReplaceTemplate(t, item, qualityLevel, worldLevel, crafting));
+                }
 
                 return false;
 			}
 
         }
 
-        private static string CheckReplaceTemplate(string[] template, ItemDrop.ItemData item, int qualityLevel, bool crafting)
+        private static string CheckReplaceTemplate(string[] template, ItemDrop.ItemData item, int qualityLevel, float worldLevel, bool crafting)
         {
             List<string> lines = new List<string>();
             for (int i = 0; i < template.Length; i++)
@@ -102,13 +111,13 @@ namespace CustomItemInfoDisplay
                     string line = template[i].Substring(template[i].IndexOf(']') + 1);
                     if (!CheckToggles(item, qualityLevel, crafting, parts, ref line))
                         continue;
-                    line = ReplaceLine(item, qualityLevel, crafting, line);
+                    line = ReplaceLine(item, qualityLevel, worldLevel, crafting, line);
                     if (line != null)
                         lines.Add(line);
                 }
                 else
                 {
-                    string line = ReplaceLine(item, qualityLevel, crafting, template[i]);
+                    string line = ReplaceLine(item, qualityLevel, worldLevel, crafting, template[i]);
                     if (line != null)
                         lines.Add(line);
                 }
@@ -255,7 +264,7 @@ namespace CustomItemInfoDisplay
             }
         }
 
-        private static string ReplaceLine(ItemDrop.ItemData item, int qualityLevel, bool crafting, string line)
+        private static string ReplaceLine(ItemDrop.ItemData item, int qualityLevel, float worldLevel, bool crafting, string line)
         {
             return line
                 .Replace("{itemDescription}", item.m_shared.m_description)
@@ -272,14 +281,14 @@ namespace CustomItemInfoDisplay
                 .Replace("{itemMovementMod}", (item.m_shared.m_movementModifier * 100f).ToString("+0;-0"))
                 .Replace("{totalMovementMod}",(Player.m_localPlayer.GetEquipmentMovementModifier() * 100).ToString("+0;-0"))
                 .Replace("{itemSetSize}", item.m_shared.m_setSize.ToString())
-                .Replace("{itemDamage}", GetDamageString(item, qualityLevel))
+                .Replace("{itemDamage}", GetDamageString(item, qualityLevel, worldLevel))
                 .Replace("{itemBaseBlock}", item.GetBaseBlockPower(qualityLevel).ToString())
                 .Replace("{itemBlock}", item.GetBlockPowerTooltip(qualityLevel).ToString("0"))
                 .Replace("{itemDeflection}", item.GetDeflectionForce(qualityLevel).ToString())
                 .Replace("{itemBlockBonus}", item.m_shared.m_timedBlockBonus.ToString())
                 .Replace("{itemAttackForce}", item.m_shared.m_attackForce.ToString())
                 .Replace("{itemBackstab}", item.m_shared.m_backstabBonus.ToString())
-                .Replace("{itemArmor}", item.GetArmor(qualityLevel).ToString())
+                .Replace("{itemArmor}", item.GetArmor(qualityLevel, worldLevel).ToString())
                 .Replace("{itemFoodHealth}", item.m_shared.m_food.ToString())
                 .Replace("{itemSetSize}", item.m_shared.m_setSize.ToString())
                 .Replace("{itemFoodStamina}", item.m_shared.m_foodStamina.ToString())
@@ -288,9 +297,9 @@ namespace CustomItemInfoDisplay
                 .Replace("\\n", "\n");
         }
 
-        private static string GetDamageString(ItemDrop.ItemData item, int qualityLevel)
+        private static string GetDamageString(ItemDrop.ItemData item, int qualityLevel, float worldLevel)
         {
-            string str = item.GetDamage(qualityLevel).GetTooltipString(item.m_shared.m_skillType);
+            string str = item.GetDamage(qualityLevel, worldLevel).GetTooltipString(item.m_shared.m_skillType);
             if (str.StartsWith("\n"))
                 return str.Substring(1);
             return str;

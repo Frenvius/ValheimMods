@@ -1,6 +1,7 @@
 ﻿using BepInEx;
 using HarmonyLib;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
@@ -15,8 +16,17 @@ namespace CustomTextures
             logDump.Clear();
             ObjectDB objectDB = ObjectDB.instance;
 
-
-            Texture2D tex = LoadTexture("atlas_item_icons", objectDB.m_items[0]?.GetComponent<ItemDrop>()?.m_itemData?.m_shared?.m_icons[0]?.texture, false, true, true);
+            Texture2D vanilla = null;
+            foreach(var go in objectDB.m_items)
+            {
+                if(go?.GetComponent<ItemDrop>()?.m_itemData?.m_shared?.m_icons.Length > 0)
+                {
+                    vanilla = go.GetComponent<ItemDrop>().m_itemData.m_shared.m_icons[0].texture;
+                    Dbgl($"got atlas at item: {go.name}");
+                    break;
+                }
+            }
+            Texture2D tex = LoadTexture("atlas_item_icons", vanilla, false, true, true);
             Dbgl($"Replacing textures for {objectDB.m_items.Count} objects");
             foreach (GameObject go in objectDB.m_items)
             {
@@ -47,36 +57,114 @@ namespace CustomTextures
                 Dbgl("\n" + string.Join("\n", logDump));
         }
 
-        private static void ReplaceZNetSceneTextures(Dictionary<int, GameObject> namedPrefabs)
+        private static void ReplaceZNetSceneTextures()
         {
-            Dbgl($"Checking {namedPrefabs.Count} prefabs");
-
             logDump.Clear();
 
-            foreach (GameObject go in namedPrefabs.Values)
+            List<GameObject> gos = new List<GameObject>();
+
+            foreach (ClutterSystem.Clutter clutter in ClutterSystem.instance.m_clutter)
             {
-                ReplaceOneGameObjectTextures(go, go.name, "object");
+                if (!gos.Contains(clutter.m_prefab))
+                    gos.Add(clutter.m_prefab);
             }
+
+            var namedPrefabs = ((Dictionary<int, GameObject>)AccessTools.Field(typeof(ZNetScene), "m_namedPrefabs").GetValue(ZNetScene.instance)).Values;
+            foreach (GameObject go in namedPrefabs)
+            {
+                if (!gos.Contains(go))
+                    gos.Add(go);
+            }
+
+            Dbgl($"Checking {gos.Count} prefabs");
+
+            foreach (GameObject gameObject in gos)
+            {
+                if (gameObject.name == "_NetSceneRoot")
+                    continue;
+                ReplaceOneGameObjectTextures(gameObject, gameObject.name, "object");
+            }
+
+            ReplaceSkyBoxTexture();
 
             if (logDump.Any())
                 Dbgl("\n" + string.Join("\n", logDump));
 
         }
-        private static void ReplaceSceneTextures(GameObject[] gos)
+
+
+        private static void ReplaceSceneObjects()
         {
 
-            Dbgl($"loading {gos.Length} scene textures");
+            SkinnedMeshRenderer[] smrs = FindObjectsOfType<SkinnedMeshRenderer>();
+            MeshRenderer[] mrs = FindObjectsOfType<MeshRenderer>();
+            ParticleSystemRenderer[] psrs = FindObjectsOfType<ParticleSystemRenderer>();
+            InstanceRenderer[] irs = FindObjectsOfType<InstanceRenderer>();
+            LineRenderer[] lrs = FindObjectsOfType<LineRenderer>();
+            ItemDrop[] ids = FindObjectsOfType<ItemDrop>();
+            Dbgl($"smrs {smrs.Length}, mrs {mrs.Length}, psrs {psrs.Length}, lrs {lrs.Length}, ids {ids.Length}");
 
-            foreach (GameObject gameObject in gos)
+            List<Component> objects = new List<Component>();
+            objects.AddRange(smrs);
+            objects.AddRange(mrs);
+            objects.AddRange(psrs);
+            objects.AddRange(irs);
+            objects.AddRange(lrs);
+            objects.AddRange(ids);
+            foreach (var r in objects)
             {
-
-                if (gameObject.name == "_NetSceneRoot")
-                    continue;
-
-                ReplaceOneGameObjectTextures(gameObject, gameObject.name, "object");
-
+                var t = r.transform;
+                var go = r.gameObject;
+                while (t.parent != null)
+                {
+                    if (t.GetComponent<MeshRenderer>() != null || t.GetComponent<SkinnedMeshRenderer>() != null || t.GetComponent<InstanceRenderer>() != null || t.GetComponent<LineRenderer>() != null || t.GetComponent<ParticleSystemRenderer>() != null || t.GetComponent<ItemDrop>() != null)
+                    {
+                        go = t.gameObject;
+                    }
+                    t = t.parent;
+                }
+                ReplaceOneGameObjectTextures(go, go.name, "object");
             }
 
+        }
+        private static void ReplaceSkyBoxTexture()
+        {
+            if (customTextures.ContainsKey("skybox_StarFieldTex"))
+            {
+                Cubemap original = RenderSettings.skybox.GetTexture("_StarFieldTex") as Cubemap;
+                Dbgl($"original skybox {RenderSettings.skybox.GetTexture("_StarFieldTex").width}x{RenderSettings.skybox.GetTexture("_StarFieldTex").height} {RenderSettings.skybox.GetTexture("_StarFieldTex").graphicsFormat} {RenderSettings.skybox.GetTexture("_StarFieldTex").filterMode}");
+
+                Cubemap cube = new Cubemap(original.width, TextureFormat.RGB24, false);
+
+                //Cubemap cube = new Cubemap(original.width, GraphicsFormat.RGBA_BC7_SRGB, flags);
+                //cube.filterMode = FilterMode.Trilinear;
+
+
+                Texture2D tex = LoadTexture("skybox_StarFieldTex", null, false);
+                var color = tex.GetPixels();
+                // For each side
+                for (int i = 0; i < 6; i++)
+                {
+                    /*
+                    Texture2D temp = new Texture2D(RenderSettings.skybox.GetTexture("_StarFieldTex").width, RenderSettings.skybox.GetTexture("_StarFieldTex").height);
+                    temp.SetPixels(cube.GetPixels((CubemapFace)i));
+                    temp.Apply();
+                    File.WriteAllBytes($"face{i}.png", ImageConversion.EncodeToPNG(temp));
+                    */
+                    cube.SetPixels(color, (CubemapFace)i);
+                    cube.Apply();
+                }
+                RenderSettings.skybox.SetTexture("_StarFieldTex", cube);
+                Dbgl($"set skybox texture");
+            }
+            if (customTextures.ContainsKey("skybox_MoonTex"))
+            {
+                Texture2D tex = LoadTexture("skybox_MoonTex", null, false);
+                var color = tex.GetPixels();
+                // For each side
+                RenderSettings.skybox.SetTexture("_MoonTex", tex);
+                Dbgl($"set moon texture");
+            }
         }
         private static void ReplaceZoneSystemTextures(ZoneSystem __instance)
         {
@@ -93,10 +181,10 @@ namespace CustomTextures
             Heightmap hm = prefab.transform.Find("Terrain")?.GetComponent<Heightmap>();
             Material mat = hm?.m_material;
 
-            if (mat != null)
+            if (mat != null && AccessTools.Field(typeof(Heightmap), "m_meshRenderer").GetValue(hm) != null)
             {
                 outputDump.Add($"terrain {zoneSystem}, prefab {prefab.name}");
-                ReplaceMaterialTextures(prefab.name, mat, zoneSystem, "terrain", "Terrain", prefab.name);
+                ReplaceMaterialTextures(prefab.name, mat, zoneSystem, "terrain", "Terrain", prefab.name, dumpSceneTextures.Value);
                 hm.Regenerate();
             }
         }
@@ -158,7 +246,7 @@ namespace CustomTextures
                 if (mat != null)
                 {
                     outputDump.Add($"terrain {zoneSystem.name}, prefab {zoneSystem.m_zonePrefab}");
-                    ReplaceMaterialTextures(zoneSystem.m_zonePrefab.name, mat, zoneSystem.name, "terrain", "Terrain", zoneSystem.m_zonePrefab.name);
+                    ReplaceMaterialTextures(zoneSystem.m_zonePrefab.name, mat, zoneSystem.name, "terrain", "Terrain", zoneSystem.m_zonePrefab.name, dumpSceneTextures.Value);
                     hm.Regenerate();
                 }
             }
@@ -170,7 +258,7 @@ namespace CustomTextures
                 if (mat != null)
                 {
                     outputDump.Add($"terrain {zoneSystem.name}, prefab {zoneSystem.m_zonePrefab}");
-                    ReplaceMaterialTextures(zoneSystem.m_zonePrefab.name, mat, zoneSystem.name, "terrain", "Terrain", zoneSystem.m_zonePrefab.name);
+                    ReplaceMaterialTextures(zoneSystem.m_zonePrefab.name, mat, zoneSystem.name, "terrain", "Terrain", zoneSystem.m_zonePrefab.name, dumpSceneTextures.Value);
                 }
             }
             if (logDump.Any())
@@ -181,7 +269,7 @@ namespace CustomTextures
 
             Dbgl($"Reloading Environment textures");
 
-            GameObject env = GameObject.Find("_GameMain/environment");
+            GameObject env = GameObject.Find("_GameMain/_Environment");
             if (env != null)
             {
                 int count = env.transform.childCount;
@@ -228,7 +316,9 @@ namespace CustomTextures
                 ReplaceOneGameObjectTextures(smr.gameObject, itemName, "object");
             if (itemInstances != null)
                 foreach (GameObject go in itemInstances)
-                   ReplaceOneGameObjectTextures(go, itemName, "object");
+                {
+                    ReplaceOneGameObjectTextures(go, itemName, "object");
+                }
         }
     }
 }

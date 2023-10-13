@@ -1,4 +1,5 @@
 ﻿using BepInEx;
+using BepInEx.Bootstrap;
 using BepInEx.Configuration;
 using HarmonyLib;
 using System;
@@ -7,12 +8,12 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
+using TMPro;
 using UnityEngine;
-using UnityEngine.UI;
 
 namespace CraftFromContainers
 {
-    [BepInPlugin("aedenthorn.CraftFromContainers", "Craft From Containers", "2.2.1")]
+    [BepInPlugin("aedenthorn.CraftFromContainers", "Craft From Containers", "3.5.0")]
     public class BepInExPlugin: BaseUnityPlugin
     {
         private static bool wasAllowed;
@@ -37,13 +38,30 @@ namespace CraftFromContainers
         public static ConfigEntry<string> preventModKey;
         public static ConfigEntry<string> fillAllModKey;
         public static ConfigEntry<bool> switchPrevent;
+        
+        public static ConfigEntry<bool> ignoreShipContainers;
+        public static ConfigEntry<bool> ignoreWagonContainers;
+        public static ConfigEntry<bool> ignoreWoodChests;
+        public static ConfigEntry<bool> ignorePrivateChests;
+        public static ConfigEntry<bool> ignoreBlackMetalChests;
+        public static ConfigEntry<bool> ignoreReinforcedChests;
 
         public static ConfigEntry<bool> modEnabled;
         public static ConfigEntry<bool> isDebug;
         public static ConfigEntry<int> nexusID;
 
         public static List<Container> containerList = new List<Container>();
+
+        public static bool odinsQolInstalled;
+        public static float itemStackSizeMultiplier;
+        public static float itemWeightReduction;
+
+        public static Vector3 lastPosition = Vector3.positiveInfinity;
+        public static List<Container> cachedContainerList = new List<Container>();
+
         private static BepInExPlugin context = null;
+        
+        private static bool skip;
 
         public class ConnectionParams
         {
@@ -54,7 +72,7 @@ namespace CraftFromContainers
         public static void Dbgl(string str = "", bool pref = true)
         {
             if (isDebug.Value)
-                Debug.Log((pref ? typeof(BepInExPlugin).Namespace + " " : "") + str);
+                context.Logger.Log(BepInEx.Logging.LogLevel.Debug, (pref ? typeof(BepInExPlugin).Namespace + " " : "") + str);
         }
         private void Awake()
         {
@@ -83,17 +101,25 @@ namespace CraftFromContainers
             pullItemsKey = Config.Bind<string>("Hot Keys", "PullItemsKey", "left ctrl", "Holding down this key while crafting or building will pull resources into your inventory instead of building. Use https://docs.unity3d.com/Manual/ConventionalGameInput.html");
             fillAllModKey = Config.Bind<string>("Hot Keys", "FillAllModKey", "left shift", "Modifier key to pull all available fuel or ore when down. Use https://docs.unity3d.com/Manual/ConventionalGameInput.html");
 
-            if (!modEnabled.Value)
-                return;
+            ignoreShipContainers = Config.Bind<bool>("Container Types", "IgnoreShipContainers", false, "If true, will ignore this type of container.");
+            ignoreWagonContainers = Config.Bind<bool>("Container Types", "IgnoreWagonContainers", false, "If true, will ignore this type of container.");
+            ignoreWoodChests = Config.Bind<bool>("Container Types", "IgnoreWoodChests", false, "If true, will ignore this type of container.");
+            ignorePrivateChests = Config.Bind<bool>("Container Types", "IgnorePrivateChests", false, "If true, will ignore this type of container.");
+            ignoreBlackMetalChests = Config.Bind<bool>("Container Types", "IgnoreBlackMetalChests", false, "If true, will ignore this type of container.");
+            ignoreReinforcedChests = Config.Bind<bool>("Container Types", "IgnoreReinforcedChests", false, "If true, will ignore this type of container.");
 
             wasAllowed = !switchPrevent.Value;
 
             Harmony.CreateAndPatchAll(Assembly.GetExecutingAssembly(), null);
+
+            Dbgl("Mod awake");
+
         }
 
         private void LateUpdate()
         {
             wasAllowed = AllowByKey();
+            skip = false;
         }
 
         private static bool AllowByKey()
@@ -123,24 +149,51 @@ namespace CraftFromContainers
         public static List<Container> GetNearbyContainers(Vector3 center)
         {
             List<Container> containers = new List<Container>();
+            if (Player.m_localPlayer is null)
+                return containers;
+            if (Vector3.Distance(center, lastPosition) < 0.5f)
+                return cachedContainerList;
+            var checkAccess = AccessTools.Method(typeof(Container), "CheckAccess");
             foreach (Container container in containerList)
             {
-                if (container != null 
-                    && container.GetComponentInParent<Piece>() != null 
-                    && Player.m_localPlayer != null 
-                    && container?.transform != null 
-                    && container.GetInventory() != null 
-                    && (m_range.Value <= 0 || Vector3.Distance(center, container.transform.position) < m_range.Value) 
+                if (container != null && container.transform != null
+                    && (m_range.Value <= 0 || Vector3.Distance(center, container.transform.position) < m_range.Value)
+                    && AllowContainerType(container)
+                    && (bool)checkAccess.Invoke(container, new object[] { Player.m_localPlayer.GetPlayerID() }) 
+                    && !container.IsInUse()
+                    && container.GetComponentInParent<Piece>() != null
+                    && container.GetInventory() != null
                     //&& (!PrivateArea.CheckInPrivateArea(container.transform.position) || PrivateArea.CheckAccess(container.transform.position, 0f, true))
-                    //&& (!container.m_checkGuardStone || PrivateArea.CheckAccess(container.transform.position, 0f, false, false)) 
-                    && Traverse.Create(container).Method("CheckAccess", new object[] { Player.m_localPlayer.GetPlayerID() }).GetValue<bool>() && !container.IsInUse())
+                    && (!container.m_checkGuardStone || PrivateArea.CheckAccess(container.transform.position, 0f, false, false))
+                    )
                 {
                     //container.GetComponent<ZNetView>()?.ClaimOwnership();
-                    Traverse.Create(container).Method("Load").GetValue();
+                    
                     containers.Add(container);
                 }
             }
+            Dbgl($"Got {containers.Count} containers.");
+            lastPosition = center;
+            cachedContainerList = containers;
             return containers;
+        }
+
+        private static bool AllowContainerType(Container __instance)
+        {
+            Ship ship = __instance.gameObject.transform.parent?.GetComponent<Ship>();
+            return (!ignoreShipContainers.Value || ship is null) && (!ignoreWagonContainers.Value || __instance.m_wagon is null) && (!ignoreWoodChests.Value || !__instance.name.StartsWith("piece_chest_wood(")) && (!ignorePrivateChests.Value || !__instance.name.StartsWith("piece_chest_private(")) && (!ignoreBlackMetalChests.Value || !__instance.name.StartsWith("piece_chest_blackmetal(")) && (!ignoreReinforcedChests.Value || !__instance.name.StartsWith("piece_chest("));
+        }
+
+        [HarmonyPatch(typeof(FejdStartup), "Awake")]
+        static class FejdStartup_Awake_Patch
+        {
+
+            static void Postfix(FejdStartup __instance)
+            {
+                if (!modEnabled.Value)
+                    return;
+                CheckOdinsQOLConfig();
+            }
         }
 
         [HarmonyPatch(typeof(Container), "Awake")]
@@ -161,7 +214,7 @@ namespace CraftFromContainers
                 //Dbgl($"Checking {container.name} {nview != null} {nview?.GetZDO() != null} {nview?.GetZDO()?.GetLong("creator".GetStableHashCode(), 0L)}");
                 if (container.GetInventory() != null && nview?.GetZDO() != null && (container.name.StartsWith("piece_") || container.name.StartsWith("Container") || nview.GetZDO().GetLong("creator".GetStableHashCode(), 0L) != 0))
                 {
-                    //Dbgl($"Adding {container.name}");
+                    Dbgl($"Adding {container.name}");
                     containerList.Add(container);
                 }
             }
@@ -190,7 +243,7 @@ namespace CraftFromContainers
             static void Prefix(InventoryGui __instance, Animator ___m_animator)
             {
                 if (Player.m_localPlayer && wasAllowed != AllowByKey() && ___m_animator.GetBool("visible"))
-                    Traverse.Create(__instance).Method("UpdateCraftingPanel", new object[] { false }).GetValue();
+                    AccessTools.Method(typeof(InventoryGui), "UpdateCraftingPanel").Invoke(__instance, new object[] { false });
             }
         }
 
@@ -346,22 +399,33 @@ namespace CraftFromContainers
             }
 
         }
-        [HarmonyPatch(typeof(Smelter), "UpdateHoverTexts")]
-        static class Smelter_UpdateHoverTexts_Patch
+        [HarmonyPatch(typeof(Smelter), "OnHoverAddFuel")]
+        static class Smelter_OnHoverAddFuel_Patch
         {
-            static void Postfix(Smelter __instance)
+            static void Postfix(Smelter __instance, ref string __result)
             {
                 if (!modEnabled.Value)
                     return;
 
                 if(fillAllModKey.Value?.Length > 0)
                 {
-                    if(__instance.m_addOreSwitch?.m_hoverText != null)
-                        __instance.m_addOreSwitch.m_hoverText += $"\n[<color=yellow><b>{fillAllModKey.Value}+$KEY_Use</b></color>] {__instance.m_addOreTooltip} max";
-                    if (__instance.m_addWoodSwitch?.m_hoverText != null)
-                        __instance.m_addWoodSwitch.m_hoverText += $"\n[<color=yellow><b>{fillAllModKey.Value}+$KEY_Use</b></color>] $piece_smelter_add max";
+                    __result += Localization.instance.Localize($"\n[<color=yellow><b>{fillAllModKey.Value}+$KEY_Use</b></color>] $piece_smelter_add max");
                 }
 
+            }
+        }
+        [HarmonyPatch(typeof(Smelter), "OnHoverAddOre")]
+        static class Smelter_OnHoverAddOre_Patch
+        {
+            static void Postfix(Smelter __instance, ref string __result)
+            {
+                if (!modEnabled.Value)
+                    return;
+
+                if(fillAllModKey.Value?.Length > 0)
+                {
+                    __result += Localization.instance.Localize($"\n[<color=yellow><b>{fillAllModKey.Value}+$KEY_Use</b></color>] {__instance.m_addOreTooltip} max");
+                }
             }
         }
 
@@ -567,11 +631,10 @@ namespace CraftFromContainers
                     {
                         return;
                     }
-                    Text text = elementRoot.transform.Find("res_amount").GetComponent<Text>();
+                    TMP_Text text = elementRoot.transform.Find("res_amount").GetComponent<TMP_Text>();
                     if (invAmount < amount)
                     {
-                        List<Container> nearbyContainers = GetNearbyContainers(Player.m_localPlayer.transform.position);
-                        foreach (Container c in nearbyContainers)
+                        foreach (Container c in GetNearbyContainers(Player.m_localPlayer.transform.position))
                             invAmount += c.GetInventory().CountItems(req.m_resItem.m_itemData.m_shared.m_name);
 
                         if (invAmount >= amount)
@@ -581,7 +644,6 @@ namespace CraftFromContainers
                         text.text = string.Format(resourceString.Value, invAmount, amount);
                     else
                         text.text = amount.ToString();
-                    text.resizeTextForBestFit = true;
                 }
             }
         }
@@ -601,16 +663,16 @@ namespace CraftFromContainers
 
 
 
-        [HarmonyPatch(typeof(Player), "HaveRequirements", new Type[] { typeof(Piece.Requirement[]), typeof(bool), typeof(int) })]
-        static class HaveRequirements_Patch
+        [HarmonyPatch(typeof(Player), "HaveRequirementItems", new Type[] { typeof(Recipe), typeof(bool), typeof(int) })]
+        static class HaveRequirementItems_Patch
         {
-            static void Postfix(Player __instance, ref bool __result, Piece.Requirement[] resources, bool discover, int qualityLevel, HashSet<string> ___m_knownMaterial)
-            {
+            static void Postfix(Player __instance, ref bool __result, Recipe piece, bool discover, int qualityLevel, HashSet<string> ___m_knownMaterial)
+            { 
                 if (!modEnabled.Value || __result || discover || !AllowByKey())
                     return;
                 List<Container> nearbyContainers = GetNearbyContainers(__instance.transform.position);
 
-                foreach (Piece.Requirement requirement in resources)
+                foreach (Piece.Requirement requirement in piece.m_resources)
                 {
                     if (requirement.m_resItem)
                     {
@@ -628,13 +690,27 @@ namespace CraftFromContainers
                 __result = true;
             }
         }
+        
+        [HarmonyPatch(typeof(Player), "UpdateKnownRecipesList")]
+        static class UpdateKnownRecipesList_Patch
+        {
+
+            static void Prefix()
+            {
+                skip = true;
+            }
+            static void Postfix()
+            {
+                skip = false;
+            }
+        }
 
         [HarmonyPatch(typeof(Player), "HaveRequirements", new Type[] { typeof(Piece), typeof(Player.RequirementMode) })]
-        static class HaveRequirements_Patch2
+        static class HaveRequirements_Patch
         {
             static void Postfix(Player __instance, ref bool __result, Piece piece, Player.RequirementMode mode, HashSet<string> ___m_knownMaterial, Dictionary<string, int> ___m_knownStations)
             {
-                if (!modEnabled.Value || __result || __instance?.transform?.position == null || !AllowByKey())
+                if (!modEnabled.Value || __result || skip || __instance?.transform?.position == null || !AllowByKey())
                     return;
 
                 //bool ignoreRange = false;
@@ -741,7 +817,10 @@ namespace CraftFromContainers
                         {
                             foreach (Container c in nearbyContainers)
                             {
-                                Inventory cInventory = c.GetInventory();
+                                Inventory cInventory = c?.GetInventory();
+                                if (cInventory is null)
+                                    continue;
+
                                 int thisAmount = Mathf.Min(cInventory.CountItems(reqName), totalRequirement - totalAmount);
 
                                 Dbgl($"Container at {c.transform.position} has {cInventory.CountItems(reqName)}");
@@ -753,12 +832,16 @@ namespace CraftFromContainers
                                 for (int i = 0; i < cInventory.GetAllItems().Count; i++)
                                 {
                                     ItemDrop.ItemData item = cInventory.GetItem(i);
-                                    if(item.m_shared.m_name == reqName)
+                                    if(item?.m_shared?.m_name == reqName)
                                     {
+                                        Dbgl($"Container has a total items count of {cInventory.GetAllItems().Count}");
                                         Dbgl($"Got stack of {item.m_stack} {reqName}");
                                         int stackAmount = Mathf.Min(item.m_stack, totalRequirement - totalAmount);
                                         if (stackAmount == item.m_stack)
-                                            cInventory.RemoveItem(item);
+                                        {
+                                            cInventory.RemoveItem(i);
+                                            i--;
+                                        }
                                         else
                                             item.m_stack -= stackAmount;
 
@@ -766,11 +849,17 @@ namespace CraftFromContainers
                                         Dbgl($"total amount is now {totalAmount}/{totalRequirement} {reqName}");
 
                                         if (totalAmount >= totalRequirement)
+                                        {
+                                            Dbgl("Got enough, breaking");
                                             break;
+                                        }
                                     }
                                 }
-                                c.GetType().GetMethod("Save", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(c, new object[] { });
-                                cInventory.GetType().GetMethod("Changed", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(cInventory, new object[] { });
+
+                                Dbgl("Saving container");
+                                typeof(Container).GetMethod("Save", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(c, new object[] { });
+                                Dbgl("Setting inventory changed");
+                                typeof(Inventory).GetMethod("Changed", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(cInventory, new object[] { });
 
                                 if (totalAmount >= totalRequirement)
                                 {
@@ -925,7 +1014,6 @@ namespace CraftFromContainers
                     return true;
                 }
                 Dbgl($"pulling resources to player inventory for crafting item {___m_selectedRecipe.Key.m_item.m_itemData.m_shared.m_name}");
-
                 PullResources(Player.m_localPlayer, ___m_selectedRecipe.Key.m_resources, qualityLevel);
                 return false;
             }
@@ -962,6 +1050,34 @@ namespace CraftFromContainers
                     return false;
                 }
                 return true;
+            }
+        }
+        
+        [HarmonyPatch(typeof(Turret), nameof(Turret.UseItem))]
+        static class Turret_UseItem_Patch
+        {
+            static void Prefix(Turret __instance, Humanoid user, ref ItemDrop.ItemData item)
+            {
+
+                if (!modEnabled.Value || !AllowByKey() || item != null || !(user is Player))
+                {
+                    Dbgl($"Not allowed {AllowByKey()} {item is null} {user is Player}");
+                    return;
+                }
+                item = user.GetInventory().GetAmmoItem(__instance.m_ammoType, __instance.GetAmmo() > 0 ? __instance.GetAmmoType() : null);
+                if(item is null)
+                {
+                    Dbgl($"No item found in inventory, checking containers for {__instance.GetAmmoType()}");
+
+                    GameObject prefab = ZNetScene.instance.GetPrefab(__instance.GetAmmoType());
+                    if (!prefab)
+                    {
+                        Dbgl($"No prefab found for {__instance.GetAmmoType()}");
+                        ZLog.LogWarning("Turret '" + __instance.name + "' is trying to fire but has no ammo or default ammo!");
+                        return;
+                    }
+                    PullResources(user as Player, new Piece.Requirement[] { new Piece.Requirement() { m_amount = 1, m_resItem = prefab.GetComponent<ItemDrop>() } }, prefab.GetComponent<ItemDrop>().m_itemData.m_quality);
+                }
             }
         }
 
@@ -1008,10 +1124,26 @@ namespace CraftFromContainers
                                 ItemDrop.ItemData sendItem = item.Clone();
                                 sendItem.m_stack = stackAmount;
 
+                                if (odinsQolInstalled)
+                                {
+                                    if (itemStackSizeMultiplier > 0)
+                                    {
+                                        sendItem.m_shared.m_weight = ApplyModifierValue(sendItem.m_shared.m_weight, itemWeightReduction);
+
+                                        if (sendItem.m_shared.m_maxStackSize > 1)
+                                            if (itemStackSizeMultiplier >= 1)
+                                                sendItem.m_shared.m_maxStackSize = (int)ApplyModifierValue(requirement.m_resItem.m_itemData.m_shared.m_maxStackSize, itemStackSizeMultiplier);
+                                    }
+                                }
+                                else
+                                {
+                                    sendItem.m_shared.m_maxStackSize = requirement.m_resItem.m_itemData.m_shared.m_maxStackSize;
+                                }
+
                                 pInventory.AddItem(sendItem);
 
                                 if (stackAmount == item.m_stack)
-                                    cInventory.RemoveItem(item);
+                                    cInventory.RemoveItem(i);
                                 else
                                     item.m_stack -= stackAmount;
 
@@ -1226,6 +1358,47 @@ namespace CraftFromContainers
 
                 return codes;
             }
+        }
+
+        public static void CheckOdinsQOLConfig()
+        {
+            itemStackSizeMultiplier = 0;
+            itemWeightReduction = 0;
+            Dictionary<string, PluginInfo> pluginInfos = Chainloader.PluginInfos;
+            foreach (PluginInfo plugin in pluginInfos.Values)
+            {
+                if (plugin?.Metadata.GUID == "com.odinplusqol.mod")
+                {
+                    odinsQolInstalled = modEnabled.Value;
+                    Debug.Log("Found OdinPlusQoL");
+                    foreach (ConfigDefinition key in plugin.Instance.Config.Keys)
+                    {
+                        if (key.Key == "Item Stack Increase")
+                        {
+                            itemStackSizeMultiplier = (float)plugin.Instance.Config[key].BoxedValue;
+                        }
+                        if (key.Key == "Item Weight Increase")
+                        {
+                            itemWeightReduction = (float)plugin.Instance.Config[key].BoxedValue;
+                        }
+                    }
+                }
+            }
+        }
+
+        public static float ApplyModifierValue(float targetValue, float value)
+        {
+            if (value <= -100)
+                value = -100;
+
+            float newValue;
+
+            if (value >= 0)
+                newValue = targetValue + targetValue / 100 * value;
+            else
+                newValue = targetValue - targetValue / 100 * (value * -1);
+
+            return newValue;
         }
 
         [HarmonyPatch(typeof(Terminal), "InputText")]

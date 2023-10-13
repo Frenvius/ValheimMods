@@ -3,12 +3,14 @@ using BepInEx.Configuration;
 using HarmonyLib;
 using System.Collections.Generic;
 using System.IO;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using static FileHelpers;
 
 namespace CharacterEdit
 {
-    [BepInPlugin("aedenthorn.CharacterEdit", "Character Edit", "0.5.0")]
+    [BepInPlugin("aedenthorn.CharacterEdit", "Character Edit", "0.8.0")]
     public class BepInExPlugin : BaseUnityPlugin
     {
         private static readonly bool isDebug = true;
@@ -46,12 +48,6 @@ namespace CharacterEdit
             harmony.PatchAll();
         }
 
-        private void OnDestroy()
-        {
-            Dbgl("Destroying plugin");
-            harmony.UnpatchAll();
-        }
-
         [HarmonyPatch(typeof(FejdStartup), "Awake")]
         static class FejdStartup_Awake_Patch
         {
@@ -61,21 +57,22 @@ namespace CharacterEdit
                 if (!modEnabled.Value)
                     return;
 
-                var edit = Instantiate(FejdStartup.instance.m_selectCharacterPanel.transform.Find("BottomWindow").Find("New"));
+                var bw = FejdStartup.instance.m_selectCharacterPanel.transform.Find("BottomWindow");
+                var edit = Instantiate(bw.Find("New"));
                 edit.name = "Edit";
-                edit.transform.SetParent(FejdStartup.instance.m_selectCharacterPanel.transform.Find("BottomWindow"));
-                edit.GetComponent<RectTransform>().anchoredPosition = new Vector3(-751, -50, 0);
-                edit.transform.Find("Text").GetComponent<Text>().text = buttonText.Value;
+                edit.transform.SetParent(bw);
+                edit.GetComponent<RectTransform>().anchoredPosition = new Vector3(-100, 50, 0);
+                edit.transform.Find("Text").GetComponent<TMP_Text>().text = buttonText.Value;
                 edit.GetComponent<Button>().onClick.RemoveAllListeners();
                 edit.GetComponent<Button>().onClick = new Button.ButtonClickedEvent();
                 edit.GetComponent<Button>().onClick.AddListener(StartCharacterEdit);
                 edit.GetComponent<UIGamePad>().m_zinputKey = gamePadButton.Value;
-                edit.transform.Find("gamepad_hint").Find("Text").GetComponent<Text>().text = gamePadButtonHint.Value;
+                edit.transform.Find("gamepad_hint").Find("Text").GetComponent<TextMeshProUGUI>().text = gamePadButtonHint.Value;
 
                 title = Instantiate(FejdStartup.instance.m_newCharacterPanel.transform.Find("Topic"));
                 title.name = "EditTitle";
                 title.SetParent(FejdStartup.instance.m_newCharacterPanel.transform);
-                title.GetComponent<Text>().text = titleText.Value;
+                title.GetComponent<TMP_Text>().text = titleText.Value;
                 title.GetComponent<RectTransform>().anchoredPosition = FejdStartup.instance.m_newCharacterPanel.transform.Find("Topic").GetComponent<RectTransform>().anchoredPosition;
                 title.gameObject.SetActive(false);
             }
@@ -101,24 +98,6 @@ namespace CharacterEdit
                 Player currentPlayerInstance = Traverse.Create(FejdStartup.instance).Field("m_playerInstance").GetValue<GameObject>().GetComponent<Player>();
                 playerProfile.SavePlayerData(currentPlayerInstance);
                 playerProfile.SetName(text);
-
-                var fileNameRef = Traverse.Create(playerProfile).Field("m_filename");
-                string fileName = fileNameRef.GetValue<string>();
-
-                if(fileName != text2)
-                {
-                    string path = Path.Combine(Utils.GetSaveDataPath(), "characters");
-                    
-                    if(File.Exists(Path.Combine(path, fileName + ".fch")))
-                        File.Move(Path.Combine(path, fileName + ".fch"), Path.Combine(path, text2 + ".fch"));
-                    if (File.Exists(Path.Combine(path, fileName + ".fch.old")))
-                        File.Move(Path.Combine(path, fileName + ".fch.old"), Path.Combine(path, text2 + ".fch.old"));
-                    if (File.Exists(Path.Combine(path, fileName + ".fch.new")))
-                        File.Move(Path.Combine(path, fileName + ".fch.new"), Path.Combine(path, text2 + ".fch.new"));
-
-                    fileNameRef.SetValue(text2);
-                }
-
                 playerProfile.Save();
 
                 __instance.m_selectCharacterPanel.SetActive(true);

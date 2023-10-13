@@ -12,7 +12,7 @@ using Debug = UnityEngine.Debug;
 
 namespace ItemStorageComponent
 {
-    [BepInPlugin("aedenthorn.ItemStorageComponent", "Item Storage Component", "0.3.0")]
+    [BepInPlugin("aedenthorn.ItemStorageComponent", "Item Storage Component", "0.5.0")]
     public class BepInExPlugin : BaseUnityPlugin
     {
         private static BepInExPlugin context;
@@ -156,7 +156,7 @@ namespace ItemStorageComponent
 
                 CloseContainer();
             }
-            if (!same && item != null && item.m_shared.m_maxStackSize <= 1 && (!requireEquipped.Value || item.m_equiped))
+            if (!same && item != null && item.m_shared.m_maxStackSize <= 1 && (!requireEquipped.Value || item.m_equipped))
             {
                 OpenItemStorage(item);
             }
@@ -174,7 +174,7 @@ namespace ItemStorageComponent
         
         private static bool CanBeContainer(ItemDrop.ItemData item)
         {
-            return item != null && (!requireEquipped.Value || item.m_equiped) && (!requireExistingTemplate.Value || itemStorageMetaDict.ContainsKey(item.m_dropPrefab.name)) && item.m_shared.m_maxStackSize <= 1;
+            return item != null && (!requireEquipped.Value || item.m_equipped) && (!requireExistingTemplate.Value || itemStorageMetaDict.ContainsKey(item.m_dropPrefab.name)) && item.m_shared.m_maxStackSize <= 1;
         }
 
         [HarmonyPatch(typeof(FejdStartup), "Start")]
@@ -273,7 +273,7 @@ namespace ItemStorageComponent
             }
         }
 
-        [HarmonyPatch(typeof(ItemDrop.ItemData), "GetTooltip", new Type[] { typeof(ItemDrop.ItemData), typeof(int), typeof(bool) })]
+        [HarmonyPatch(typeof(ItemDrop.ItemData), "GetTooltip", new Type[] { typeof(ItemDrop.ItemData), typeof(int), typeof(bool), typeof(float) })]
         static class GetTooltip_Patch
         {
             static void Postfix(ItemDrop.ItemData item, ref string __result)
@@ -350,7 +350,7 @@ namespace ItemStorageComponent
                 return true;
             }
         }
-        [HarmonyPatch(typeof(Inventory), "AddItem", new Type[] { typeof(string), typeof(int), typeof(float), typeof(Vector2i), typeof(bool), typeof(int), typeof(int), typeof(long), typeof(string) })]
+        [HarmonyPatch(typeof(Inventory), "AddItem", new Type[] { typeof(string), typeof(int), typeof(float), typeof(Vector2i), typeof(bool), typeof(int), typeof(int), typeof(long), typeof(string), typeof(Dictionary<string, string>), typeof(int), typeof(bool) })]
         static class AddItem_Patch3
         {
             static bool Prefix(ref bool __result, Inventory __instance, string name)

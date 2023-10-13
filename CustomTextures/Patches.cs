@@ -1,4 +1,5 @@
 ﻿using HarmonyLib;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -48,7 +49,7 @@ namespace CustomTextures
 
                 stopwatch.Restart();
 
-                ReplaceZNetSceneTextures(___m_namedPrefabs);
+                ReplaceZNetSceneTextures();
 
                 LogStopwatch("ZNetScene");
                 //stopwatch.Restart();
@@ -56,6 +57,19 @@ namespace CustomTextures
                 ReplaceEnvironmentTextures();
 
                 //LogStopwatch("ZNetScene 2");
+            }
+        }
+
+        
+        //[HarmonyPatch(typeof(Player), "Start")]
+        static class Player_Start_Patch
+        {
+            static void Prefix(Player __instance)
+            {
+                if (!modEnabled.Value || Player.m_localPlayer != __instance)
+                    return;
+                Dbgl($"Player Awake");
+                ReloadTextures(replaceLocationTextures.Value);
             }
         }
 
@@ -101,13 +115,7 @@ namespace CustomTextures
 
                     LogStopwatch("ZoneSystem Locations");
                 }
-                if (ZNetScene.instance && dumpSceneTextures.Value)
-                {
-                    string path = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "CustomTextures", "scene_dump.txt");
-                    Dbgl($"Writing {path}");
-                    File.WriteAllLines(path, outputDump);
-                    dumpSceneTextures.Value = false;
-                }
+
             }
         }
         [HarmonyPatch(typeof(VisEquipment), "Awake")]
@@ -135,6 +143,17 @@ namespace CustomTextures
                         }
                     }
                 }
+            }
+        }
+
+        [HarmonyPatch(typeof(Humanoid), "SetupVisEquipment")]
+        static class Humanoid_SetupVisEquipment_Patch
+        {
+            static void Postfix(Humanoid __instance)
+            {
+                if (!modEnabled.Value)
+                    return;
+                SetupVisEquipment(__instance);
             }
         }
     }

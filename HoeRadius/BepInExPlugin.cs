@@ -6,7 +6,7 @@ using UnityEngine;
 
 namespace HoeRadius
 {
-    [BepInPlugin("aedenthorn.HoeRadius", "Hoe Radius", "0.1.1")]
+    [BepInPlugin("aedenthorn.HoeRadius", "Hoe Radius", "0.2.1")]
     public class BepInExPlugin : BaseUnityPlugin
     {
 
@@ -53,7 +53,7 @@ namespace HoeRadius
         }
         private void Update()
         {
-            if (!modEnabled.Value || !Player.m_localPlayer || !Player.m_localPlayer.InPlaceMode() || Hud.IsPieceSelectionVisible())
+            if (false && !modEnabled.Value || !Player.m_localPlayer || !Player.m_localPlayer.InPlaceMode() || Hud.IsPieceSelectionVisible())
             {
                 if(lastOriginalRadius != 0)
                 {
@@ -81,8 +81,10 @@ namespace HoeRadius
 
         private void SetRadius(float delta)
         {
-            Piece selectedPiece = Traverse.Create(Player.m_localPlayer).Field("m_buildPieces").GetValue<PieceTable>().GetSelectedPiece();
-            var op = selectedPiece.gameObject.GetComponent<TerrainOp>();
+            Piece selectedPiece = Traverse.Create(Player.m_localPlayer).Field("m_buildPieces")?.GetValue<PieceTable>()?.GetSelectedPiece();
+            if (selectedPiece is null)
+                return;
+            var op = selectedPiece?.gameObject.GetComponent<TerrainOp>();
             if (op == null)
                 return;
 
